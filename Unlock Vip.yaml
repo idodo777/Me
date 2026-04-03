@@ -3,17 +3,13 @@ description: |
   自用收集解锁Vip
 
 
-
-[URL Rewrite]
-(https:\/\/)?t.me\/(.+) intent://resolve?domain=$2 302
-
-[Script]
+Script
 简影解锁=type=http-response,pattern=^http[s]?:\/\/api.jianmovie.com,requires-body=1,script-path=https://raw.githubusercontent.com/89996462/Quantumult-X/main/ycdz/jianmovie.js
 
 爱企查vip=type=http-response,pattern=^https:\//aiqicha.baidu.com\/usercenter\/getvipinfoajax,requires-body=1,script-path=https://raw.githubusercontent.com/litieyin/AD_VIP/main/Script/aiqicha.js
 
 百度文库=type=http-response,pattern=^https:\/\/appwk\.baidu\.com\/naapi\/user\/getinfo,requires-body=1,script-path=https://github.com/deezertidal/private/raw/master/js-backup/Crack/baidulibrary.js
 
-[MITM]
+mitm
 hostname = %APPEND% t.me, %APPEND% api.jianmovie.com, %APPEND% aiqicha.baidu.com, %APPEND% appwk.baidu.com
 
