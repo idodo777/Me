@@ -2,14 +2,36 @@ name: 自用解锁Vip合集
 description: |
   自用收集解锁Vip
 
+script-providers:
+  jianmovie:
+    url: https://raw.githubusercontent.com/89996462/Quantumult-X/main/ycdz/jianmovie.js
+    interval: 86400
+  aiqicha:
+    url: https://raw.githubusercontent.com/litieyin/AD_VIP/main/Script/aiqicha.js
+    interval: 86400
+  baidulibrary:
+    url: https://github.com/deezertidal/private/raw/master/js-backup/Crack/baidulibrary.js
+    interval: 86400
 
-Script
-简影解锁=type=http-response,pattern=^http[s]?:\/\/api.jianmovie.com,requires-body=1,script-path=https://raw.githubusercontent.com/89996462/Quantumult-X/main/ycdz/jianmovie.js
+scripts:
+  简影解锁:
+    type: http-response
+    pattern: ^http[s]?:\/\/api.jianmovie.com
+    requires-body: true
+    script-provider: jianmovie
+  爱企查vip:
+    type: http-response
+    pattern: ^https:\/\/aiqicha\.baidu\.com\/usercenter\/getvipinfoajax
+    requires-body: true
+    script-provider: aiqicha
+  百度文库:
+    type: http-response
+    pattern: ^https:\/\/appwk\.baidu\.com\/naapi\/user\/getinfo
+    requires-body: true
+    script-provider: baidulibrary
 
-爱企查vip=type=http-response,pattern=^https:\//aiqicha.baidu.com\/usercenter\/getvipinfoajax,requires-body=1,script-path=https://raw.githubusercontent.com/litieyin/AD_VIP/main/Script/aiqicha.js
-
-百度文库=type=http-response,pattern=^https:\/\/appwk\.baidu\.com\/naapi\/user\/getinfo,requires-body=1,script-path=https://github.com/deezertidal/private/raw/master/js-backup/Crack/baidulibrary.js
-
-mitm
-hostname = %APPEND% t.me, %APPEND% api.jianmovie.com, %APPEND% aiqicha.baidu.com, %APPEND% appwk.baidu.com
-
+mitm:
+  hostnames:
+    - api.jianmovie.com
+    - aiqicha.baidu.com
+    - appwk.baidu.com
