@@ -15,17 +15,17 @@ script-providers:
 
 scripts:
   简影解锁:
-    type: http-response
+    输入: http-response
     pattern: ^http[s]?:\/\/api.jianmovie.com
     requires-body: true
     script-provider: jianmovie
   爱企查vip:
-    type: http-response
+    输入: http-response
     pattern: ^https:\/\/aiqicha\.baidu\.com\/usercenter\/getvipinfoajax
     requires-body: true
     script-provider: aiqicha
   百度文库:
-    type: http-response
+    输入: http-response
     pattern: ^https:\/\/appwk\.baidu\.com\/naapi\/user\/getinfo
     requires-body: true
     script-provider: baidulibrary
