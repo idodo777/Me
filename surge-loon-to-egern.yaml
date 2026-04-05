@@ -16,7 +16,7 @@ body_rewrites:
       find: surge:///install-module\?url=
       replace: egern:///modules/new?url=
   - response_regex:
-      match: https://loonlab\.130516\.xyz/
+      match: https://(loonlab|loon)\.103516\.xyz/
       find: loon://import?plugin=
       replace: egern:///modules/new?url=
   - response_regex:
