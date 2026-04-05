@@ -3,7 +3,7 @@ description: |
   插件中心跳Egern 只跳转不经过Script转换
   可莉插件网址：https://hub.kelee.one
   色鸡模块网址：https://surge.qingr.moe
-  恩秀模块网址：https://loonlab.103516.xyz
+  恩秀模块网址：https://loonlab.103516.xyz/Plugin/
   胖虎模块网址：https://kelvinlab.wuyra.com/
 
 body_rewrites:
@@ -16,7 +16,7 @@ body_rewrites:
       find: surge:///install-module\?url=
       replace: egern:///modules/new?url=
   - response_regex:
-      match: https://(loonlab|loon)\.103516\.xyz/
+      match: https://(loonlab|loon)\.103516\.xyz\.Plugin/
       find: loon://import?plugin=
       replace: egern:///modules/new?url=
   - response_regex:
