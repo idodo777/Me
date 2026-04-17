@@ -2,18 +2,8 @@ name: PingMe签到
 description: PingMe签到
 open_url: https://apps.apple.com/app/id1444762648
 compat_arguments:
-  arg2: flag
-  arg1: 38 8,21 * * *
-compat_arguments_schema:
-  arg2:
-    name: get_cookie
-    default_value: flag
-    options:
-    - 'true'
-    - 'false'
-  arg1:
-    name: cron
-    default_value: 38 8,21 * * *
+  获取Cookie: get_cookie
+  定时签到: 38 8,21 * * *
 dns: {}
 scriptings:
 - http_request:
