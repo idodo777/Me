@@ -1,0 +1,32 @@
+name: PingMe签到
+description: PingMe签到
+open_url: https://apps.apple.com/app/id1444762648
+compat_arguments:
+  arg2: flag
+  arg1: 38 8,21 * * *
+compat_arguments_schema:
+  arg2:
+    name: cookie
+    default_value: flag
+    options:
+    - 'true'
+    - 'false'
+  arg1:
+    name: cron
+    default_value: 38 8,21 * * *
+dns: {}
+scriptings:
+- http_request:
+    name: cookie
+    match: ^https:\/\/api\.pingmeapp\.net\/app\/queryBalanceAndBonus
+    script_url: https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cookie/get_cookie.js
+    timeout: 60
+- schedule:
+    name: PingMe签到
+    cron: 38 8,21 * * *
+    script_url: https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/PingMe/PingMeSignin.js
+    timeout: 120
+mitm:
+  hostnames:
+    includes:
+    - api.pingmeapp.net
