@@ -6,7 +6,7 @@ compat_arguments:
   arg1: 38 8,21 * * *
 compat_arguments_schema:
   arg2:
-    name: cookie
+    name: get_cookie
     default_value: flag
     options:
     - 'true'
@@ -17,7 +17,7 @@ compat_arguments_schema:
 dns: {}
 scriptings:
 - http_request:
-    name: cookie
+    name: get_cookie
     match: ^https:\/\/api\.pingmeapp\.net\/app\/queryBalanceAndBonus
     script_url: https://raw.githubusercontent.com/fmz200/wool_scripts/main/Scripts/cookie/get_cookie.js
     timeout: 60
