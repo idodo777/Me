@@ -17,7 +17,7 @@ body_rewrites:
       replace: egern:///modules/new?url=
   - response_regex:
       match: https://(loonlab|loon)\.103516\.xyz\.Plugin/
-      find: loon://import?plugin=
+      find: loon://import\?plugin=
       replace: egern:///modules/new?url=
   - response_regex:
       match: https://kelvinlab\.wuyra\.com/
