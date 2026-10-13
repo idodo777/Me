@@ -4,6 +4,7 @@ description: |
   可莉插件网址：https://hub.kelee.one
   色鸡模块网址：https://surge.qingr.moe
   胖虎模块网址：https://kelvinlab.wuyra.com/
+  老外模块网址：https://loon-plugins.vercel.app
 
 body_rewrites:
   - response_regex:
@@ -18,6 +19,10 @@ body_rewrites:
       match: https://kelvinlab\.wuyra\.com/
       find: loon://import\?plugin=
       replace: egern:///modules/new?url=
+  - response_regex:
+      match: https://loon-plugins\.vercel\.app/
+      find: loon://import\?plugin=
+      replace: egern:///modules/new?url=
 mitm:
   hostnames:
     includes:
@@ -25,4 +30,5 @@ mitm:
       - hub.kelee.one
       - surge.qingr.moe
       - kelvinlab.wuyra.com
+      - loon-plugins.vercel.app
 
