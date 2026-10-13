@@ -21,8 +21,10 @@ body_rewrites:
       replace: egern:///modules/new?url=
   - response_regex:
       match: https://loon-plugins\.vercel\.app/
-      find: loon://import\?plugin=
-      replace: egern:///modules/new?url=
+  - url_rewrites:
+      match: ^https:\/\/www\.nsloon\.com\/openloon\/import\?plugin=(.*)$
+      location: "egern:///modules/new?url=$1"
+      status_code: 302
 mitm:
   hostnames:
     includes:
