@@ -20,11 +20,11 @@ body_rewrites:
       find: loon://import\?plugin=
       replace: egern:///modules/new?url=
   - response_regex:
-      match: https://loon-plugins\.vercel\.app/
+      match: https://loon-plugins\.vercel\.app\/(zh)?
       find: loon://import\?plugin=
       replace: egern:///modules/new?url=
   - response_regex:
-      match: https://loon-plugins\.vercel\.app/
+      match: https://loon-plugins\.vercel\.app\/(zh)?
       find: https:\/\/www\.nsloon\.com\/openloon\/import\?plugin=
       replace: egern:///modules/new?url=
 
