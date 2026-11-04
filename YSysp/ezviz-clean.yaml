@@ -1,0 +1,30 @@
+name: "萤石云视频净化"
+description: "去除萤石云视频（EZVIZ）开屏广告，隐藏底部「对话 / 商城 / 社区」三个 Tab。脚本已托管在作者 GitHub（idodo777/Me/YSysp），直接导入即可用。"
+author: "Muse"
+homepage: "https://apps.apple.com/app/id571195405"
+
+compat_arguments:
+  SCRIPT_BASE: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp"
+compat_arguments_desc:
+  SCRIPT_BASE: "两个 JS 文件所在的目录 URL（末尾不要带斜杠）"
+
+url_rewrites:
+  # 已知开屏广告接口：直接返回空 JSON，开屏无广告可播
+  - match: '^https://i\.ys7\.com/api/ads(\?.*)?$'
+    location: "http://reject-dict/"
+
+scriptings:
+  - name: "萤石开屏广告"
+    type: http_response
+    match: '^https://[^/]+\.ys7\.com/.*(ads|advert|splash|launch|startup|openscreen).*'
+    script_url: "{{{SCRIPT_BASE}}}/ezviz-splash.js"
+    body_required: true
+  - name: "萤石底部Tab精简"
+    type: http_response
+    match: '^https://[^/]+\.ys7\.com/.*'
+    script_url: "{{{SCRIPT_BASE}}}/ezviz-tabs.js"
+    body_required: true
+
+mitm:
+  hostnames:
+    includes: ["*.ys7.com"]
