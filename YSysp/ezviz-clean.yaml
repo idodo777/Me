@@ -2,17 +2,14 @@ name: "萤石云视频净化"
 description: "去除萤石云视频（EZVIZ）广告（广告总开关 adYsFlag/adThirdFlag 置 0 + 广告数组清空），隐藏底部「对话」Tab（灰度开关 300045 置 0）。商城/社区 Tab 经抓包核查为客户端写死、无服务端开关，网络层无法隐藏。"
 author: "Muse"
 homepage: "https://apps.apple.com/app/id571195405"
-url_rewrites:
-  - match: "^https://i\\.ys7\\.com/api/ads(\\?.*)?$"
-    location: "http://reject-dict/"
 scriptings:
   - http_response:
-      name: "萤石开屏广告"
+      name: "萤石广告关闭"
       match: "^https://[^/]+\\.ys7\\.com/.*"
       script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-splash.js"
       body_required: true
   - http_response:
-      name: "萤石底部Tab精简"
+      name: "萤石隐藏对话Tab"
       match: "^https://[^/]+\\.ys7\\.com/.*"
       script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-tabs.js"
       body_required: true
