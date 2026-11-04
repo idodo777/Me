@@ -28,10 +28,21 @@ function scrub(node, depth) {
   return changed;
 }
 
+// 广告数组的结构签名：条目带 ad_type + materiel/img 素材字段
+// （实测样本：商城 Tab 的「半价」角标广告 —— [{name:"半价", place:3, ad_type:1, materiel:{...}, img:".../mall/*.png"}]）
+function isAdArray(data) {
+  return Array.isArray(data) && data.length > 0 && data.every(it =>
+    it && typeof it === 'object' && !Array.isArray(it) &&
+    'ad_type' in it && ('materiel' in it || 'img' in it));
+}
+
 export default async function (ctx) {
   try {
     const data = await ctx.response.json();
     if (!data || typeof data !== 'object') return;
+
+    // 整条响应就是广告数组（如角标/横幅广告位）：直接清空
+    if (isAdArray(data)) return { body: [] };
 
     // 若整个 data 载荷就是广告（如只有广告素材字段），直接掏空 data
     let changed = scrub(data, 0);
