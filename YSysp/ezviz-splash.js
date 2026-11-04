@@ -7,6 +7,11 @@
 
 const AD_KEY_RE = /^(ads?|adlist|advert\w*|splash\w*|launch\w*|openscreen|startup\w*|promot\w*|adinfo|adconfig|admaterial\w*)$/i;
 
+// 广告总开关（实测自 /v3/adService/sdkConfig/query 一类配置响应）：
+// adYsFlag=萤石自有广告，adThirdFlag=第三方广告。置 0 = 让 App 自己关掉广告，
+// 与逐个拦素材接口相比最干净（借鉴 txvideo 的 AB 配置手术）。
+const AD_FLAG_KEYS = ['adYsFlag', 'adThirdFlag'];
+
 function scrub(node, depth) {
   if (depth > 12 || node === null || typeof node !== 'object') return false;
   let changed = false;
@@ -16,6 +21,10 @@ function scrub(node, depth) {
   }
   for (const key of Object.keys(node)) {
     const val = node[key];
+    if (AD_FLAG_KEYS.indexOf(key) >= 0) {
+      if (val === 1 || val === true || val === '1') { node[key] = 0; changed = true; }
+      continue;
+    }
     if (AD_KEY_RE.test(key)) {
       if (Array.isArray(val) && val.length) { node[key] = []; changed = true; }
       else if (val && typeof val === 'object' && Object.keys(val).length) { node[key] = {}; changed = true; }
