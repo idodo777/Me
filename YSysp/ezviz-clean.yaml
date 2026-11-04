@@ -2,23 +2,20 @@ name: "萤石云视频净化"
 description: "去除萤石云视频（EZVIZ）开屏广告，隐藏底部「对话 / 商城 / 社区」三个 Tab。"
 author: "Muse"
 homepage: "https://apps.apple.com/app/id571195405"
-
 url_rewrites:
-  - match: '^https://i\.ys7\.com/api/ads(\?.*)?$'
+  - match: "^https://i\\.ys7\\.com/api/ads(\\?.*)?$"
     location: "http://reject-dict/"
-
 scriptings:
-  - name: "萤石开屏广告"
-    type: http_response
-    match: '^https://[^/]+\.ys7\.com/.*(ads|advert|splash|launch|startup|openscreen).*'
-    script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-splash.js"
-    body_required: true
-  - name: "萤石底部Tab精简"
-    type: http_response
-    match: '^https://[^/]+\.ys7\.com/.*'
-    script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-tabs.js"
-    body_required: true
-
+  - http_response:
+      name: "萤石开屏广告"
+      match: "^https://[^/]+\\.ys7\\.com/.*(ads|advert|splash|launch|startup|openscreen).*"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-splash.js"
+      body_required: true
+  - http_response:
+      name: "萤石底部Tab精简"
+      match: "^https://[^/]+\\.ys7\\.com/.*"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-tabs.js"
+      body_required: true
 mitm:
   hostnames:
-    includes: ["*.ys7.com"]
+    - "*.ys7.com"
