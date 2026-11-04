@@ -1,0 +1,25 @@
+rules:
+  - domain_suffix:
+      match: "eplayerx.com"
+      policy: "DIRECT"
+
+  - domain_suffix:
+      match: "mobaiemby.site"
+      policy: "DIRECT"
+
+  - domain_suffix:
+      match: "reflix.top"
+      policy: "DIRECT"
+
+  - ip_cidr:
+      match: "45.143.131.228/32"
+      policy: "DIRECT"
+      name: "墨云阁"
+
+  - and:
+      match:
+        - ip_cidr:
+            match: "110.42.42.172/32"
+        - dest_port:
+            match: "36890"
+      policy: "DIRECT"
