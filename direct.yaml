@@ -12,7 +12,13 @@ and_set:
       match: 45.143.131.228/32
     - !dest_port
       match: "55555"
+  # alpha
   - - !ip_cidr
       match: 110.42.42.172/32
     - !dest_port
       match: "36890"
+  # alpha
+  - - !domain_suffix
+      match: as3.204cloud.com
+    - !dest_port
+      match: "443"
