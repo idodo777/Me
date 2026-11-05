@@ -16,11 +16,13 @@
  *
  * 与原版的两点差异（QuanX 机制在 Egern 不存在，只能换等价物）：
  * - 原版靠「长按节点 → 执行脚本」把节点名传入，并用 QuanX 私有接口
- *   读出节点地址；Egern 没有这两个接口，改为在 Env 里配置要测的节点：
- *     POLICY = 节点或策略组名称（要与 Egern 配置里的名字一字不差）
- *     HOST   = 节点服务器地址（域名或 IP）
- *     PORT   = 节点端口
- *     NAME   = 显示名（可选，默认用 POLICY）
+ *   读出节点地址；Egern 没有这两个接口，改走模块的可视化参数：
+ *   Egern → 工具 → 模块 → 节点阻断检测 → 编辑，在「模版参数」里填
+ *     节点名称（POLICY，要与 Egern 配置里的名字一字不差）
+ *     服务器地址（HOST，域名或 IP）
+ *     服务器端口（PORT）
+ *     显示名称（NAME，可选，默认用 POLICY）
+ *   保存后手动运行本脚本；参数值经模块替换进入脚本的 env。
  * - 原版结果显示在 QuanX 的 HTML 面板里；Egern 版改为发通知 + 写日志，
  *   结论在通知第一行。
  *
@@ -324,7 +326,7 @@ export default async function (ctx) {
     if (!policy || !host || !port) {
         await ctx.notify({
             title: "🌐 节点阻断检测",
-            body: "还没配置要测的节点：请在 Egern 的模块 Env 区填写 POLICY（节点名）、HOST（服务器地址）、PORT（端口）后重新运行本脚本。"
+            body: "还没填写节点信息：Egern → 工具 → 模块 → 节点阻断检测 → 编辑，在「模版参数」里填好节点名称、服务器地址、服务器端口，保存后重新运行。"
         });
         return;
     }
