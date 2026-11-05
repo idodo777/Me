@@ -1,5 +1,5 @@
 name: "浦大喜奔开屏广告拦截"
-description: "拦截浦大喜奔（浦发银行信用卡 App）开屏广告：仅当 image/images.spdbccc.com.cn 返回的图片（JPEG/PNG/GIF）实际分辨率为 1125x1931（服务器下发的开屏图实际尺寸，抓包实测）时终止响应，其他尺寸与格式一律放行，异常时自动放行。"
+description: "拦截开屏广告"
 author: "idodo777"
 homepage: "https://github.com/idodo777/Me"
 

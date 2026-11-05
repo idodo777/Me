@@ -1,5 +1,5 @@
 name: "萤石云视频净化"
-description: "去除萤石云视频（EZVIZ）广告（广告总开关 adYsFlag/adThirdFlag 置 0 + 广告数组清空），隐藏底部「对话」Tab（灰度开关 300045 置 0）。商城/社区 Tab 经抓包核查为客户端写死、无服务端开关，网络层无法隐藏。"
+description: "去除开屏广告和角标广告，隐藏对话Tab"
 author: "Muse"
 homepage: "https://apps.apple.com/app/id571195405"
 scriptings:
