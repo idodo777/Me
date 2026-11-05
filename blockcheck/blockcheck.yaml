@@ -1,0 +1,15 @@
+name: "节点阻断检测"
+description: "节点阻断检测"
+author: "idodo777"
+homepage: "https://github.com/idodo777/Me"
+
+scriptings:
+  - generic:
+      name: "节点阻断检测"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check_egern.js"
+      env:
+        POLICY: ""
+        HOST: ""
+        PORT: ""
+        NAME: ""
+      timeout: 60
