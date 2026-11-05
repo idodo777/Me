@@ -184,14 +184,6 @@ function root(children, padding) {
     };
 }
 
-function headRow(m, size) {
-    return row([
-        T("节点阻断检测", size, C.soft, "semibold"),
-        spacer(),
-        T(m.time, size - 2, C.faint, "medium"),
-    ], { gap: 5 });
-}
-
 function exitLine(m, size) {
     if (m.status !== "ok") return null;
     const info = m.via.info;
@@ -213,18 +205,80 @@ function footRow(m, size) {
     ], { gap: 5 });
 }
 
-function mediumWidget(m) {
-    return root([
-        headRow(m, 13),
-        spacer(10),
-        row([icon(m.icon, 20, m.color), T(m.title, 20, C.ink, "bold", { minScale: 0.7 })], { gap: 7 }),
-        spacer(8),
-        exitLine(m, 16),
-        m.status === "ok" ? spacer(4) : null,
-        metaLine(m, 12),
-        m.status !== "ok" ? T(m.advice, 12, C.soft, "regular", { maxLines: 2, minScale: 0.7 }) : null,
+// 顶行照参照效果图：国旗 国家 城市 …… 时间；出口不通时没有出口信息，改放检测目标
+function topRow(m, size) {
+    if (m.status === "ok") {
+        const info = m.via.info;
+        return row([
+            T(getFlag(info.countryCode), size),
+            T(info.country || "", size, C.ink, "semibold"),
+            info.city ? T(info.city, size, C.soft, "regular", { minScale: 0.6 }) : null,
+            spacer(),
+            T(m.time, size - 2, C.faint, "medium"),
+        ], { gap: 5 });
+    }
+    return row([
+        T("🌐", size),
+        T(m.target, size, C.ink, "semibold"),
         spacer(),
-        footRow(m, 11),
+        T(m.time, size - 2, C.faint, "medium"),
+    ], { gap: 5 });
+}
+
+// 「标签 + 值」一行（照参照脚本 field 的写法）：标签浅灰固定宽，值带 flex 靠左
+function fieldRow(label, value, size = 11) {
+    return row([
+        { type: "stack", direction: "row", width: 34, children: [T(label, size, C.faint, "medium"), spacer()] },
+        { ...value, flex: 1 },
+    ], { gap: 6 });
+}
+
+// 右栏的状态徽：大图标 + 结论词，颜色表达状态（照参照图右侧色条的位置）
+function statusBadge(m, iconSize, fontSize) {
+    return {
+        type: "stack", direction: "column", alignItems: "center",
+        children: [
+            icon(m.icon, iconSize, m.color),
+            spacer(5),
+            T(m.title, fontSize, m.color, "semibold", { minScale: 0.6 }),
+            m.status === "ok" ? T(`${m.via.ms}ms`, fontSize - 2, C.faint, "medium") : null,
+        ].filter(Boolean),
+    };
+}
+
+// 底行照参照图：左边直连状态（图标着色、文字正文色），右边检测目标
+function bottomRow(m, size) {
+    const d = m.direct;
+    return row([
+        icon(d.ok ? "checkmark.seal.fill" : "xmark.seal.fill", size, d.ok ? C.good : C.bad),
+        T(d.ok ? "直连正常" : "直连失败", size + 1, C.ink, "medium"),
+        spacer(),
+        T(m.target, size, C.faint, "medium", { minScale: 0.7 }),
+    ], { gap: 4 });
+}
+
+// 中号照参照效果图的版式：顶行地区时间；中间左栏大 IP + 标签行，右栏状态徽；底行直连与目标
+function mediumWidget(m) {
+    const info = m.status === "ok" ? m.via.info : null;
+    const left = col([
+        info
+            ? T(info.query, 20, C.ink, "bold", { minScale: 0.55 })
+            : T(m.title, 20, C.ink, "bold", { minScale: 0.6 }),
+        spacer(10),
+        info
+            ? fieldRow("运营商", T(info.isp || "未知", 11, C.ink, "semibold", { minScale: 0.6 }))
+            : fieldRow("直连", T(m.direct.ok ? m.direct.info.query : "失败", 11, C.ink, "semibold", { minScale: 0.6 })),
+        spacer(6),
+        info
+            ? fieldRow("出口", T(placeOf(info), 11, C.ink, "semibold", { minScale: 0.6 }))
+            : T(m.advice, 11, C.soft, "regular", { maxLines: 2, minScale: 0.7 }),
+    ]);
+    return root([
+        topRow(m, 13),
+        spacer(),
+        row([{ ...left, flex: 40 }, { ...statusBadge(m, 40, 13), flex: 37 }], { gap: 14, alignItems: "start" }),
+        spacer(),
+        bottomRow(m, 11),
     ], 14);
 }
 
@@ -240,24 +294,32 @@ function smallWidget(m) {
     ], 12);
 }
 
+// 大号与中号同版式放大，并把直连明细整行列出
 function largeWidget(m) {
+    const info = m.status === "ok" ? m.via.info : null;
     const directText = m.direct.ok
         ? `本机直连：${getFlag(m.direct.info.countryCode)} ${m.direct.info.query}${m.direct.info.isp ? " · " + m.direct.info.isp : ""}`
         : "本机直连：失败";
-    return root([
-        headRow(m, 15),
+    const left = col([
+        info
+            ? T(info.query, 24, C.ink, "bold", { minScale: 0.55 })
+            : T(m.title, 24, C.ink, "bold", { minScale: 0.6 }),
         spacer(12),
-        row([icon(m.icon, 24, m.color), T(m.title, 24, C.ink, "bold", { minScale: 0.7 })], { gap: 8 }),
-        spacer(10),
-        exitLine(m, 18),
-        m.status === "ok" ? spacer(5) : null,
-        metaLine(m, 13),
-        spacer(10),
-        T(directText, 13, C.soft, "regular", { minScale: 0.7 }),
-        m.status !== "ok" ? spacer(6) : null,
-        m.status !== "ok" ? T(`可能：${m.advice}`, 13, C.soft, "regular", { maxLines: 2, minScale: 0.7 }) : null,
+        info ? fieldRow("运营商", T(info.isp || "未知", 13, C.ink, "semibold", { minScale: 0.6 })) : null,
+        info ? spacer(7) : null,
+        info ? fieldRow("出口", T(placeOf(info), 13, C.ink, "semibold", { minScale: 0.6 })) : null,
+        info ? spacer(7) : null,
+        info ? fieldRow("耗时", T(`${m.via.ms}ms`, 13, C.ink, "semibold")) : null,
+        !info ? T(m.advice, 13, C.soft, "regular", { maxLines: 2, minScale: 0.7 }) : null,
+    ]);
+    return root([
+        topRow(m, 15),
         spacer(),
-        footRow(m, 12),
+        row([{ ...left, flex: 40 }, { ...statusBadge(m, 54, 15), flex: 37 }], { gap: 14, alignItems: "start" }),
+        spacer(),
+        T(directText, 13, C.soft, "regular", { minScale: 0.7 }),
+        spacer(8),
+        bottomRow(m, 12),
     ], 16);
 }
 
