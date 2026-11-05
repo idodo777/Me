@@ -9,6 +9,10 @@ ip_cidr_set:
   - 45.143.131.228/32
 and_set:
   - - !ip_cidr
+      match: 45.143.131.228/32
+    - !dest_port
+      match: "55555"
+  - - !ip_cidr
       match: 110.42.42.172/32
     - !dest_port
       match: "36890"
