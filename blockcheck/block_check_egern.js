@@ -9,8 +9,10 @@
  * 检测方法（与原版一致，多方交叉验证）：
  * 1) 节点代理 —— 经策略访问 ip-api.com，通不通、出口是哪；
  * 2) 本机网络 —— 本机直连 ip-api.com，排除本机断网；
- * 3) 远端探测 —— check-host.net 海外约 10 个国家探针 TCP 探测节点
- *    服务器地址，逐个国家列出延迟（哪国线路不通一目了然）；
+ * 3) 远端探测 —— 固定六国探针 TCP 探测节点服务器地址，逐国列出
+ *    延迟（哪国线路不通一目了然）：日本、美国、英国、德国、韩国、
+ *    新加坡。五国用 check-host 指定探针；check-host 没有韩国探针，
+ *    韩国用 Globalping 的韩国探针补齐；
  * 4) 国内探测 —— 仅当「海外可达 + 国内经节点不通」时触发：
  *    Globalping 国内电信/联通/移动探针定位阻断来源
  *    （三家全不通 = GFW 全局阻断；某家不通 = 运营商级拦截；
@@ -195,36 +197,86 @@ async function checkDirect(ctx) {
     }
 }
 
-// 远端探测：check-host 海外探针 TCP 探测 host:port（原版流程 + [null] 守卫）
+// 远端探测的固定国家阵容（顺序按用户指定）：日本、美国、英国、德国、韩国、新加坡。
+// 五国用 check-host 的指定探针；check-host 没有韩国探针（2026-11-05 实测
+// 其 55 个探针无 KR），韩国改用 Globalping 的韩国探针补齐，延迟口径一致。
+const REMOTE_COUNTRIES = [
+    { cc: "JP", node: "jp1.node.check-host.net" },  // 东京
+    { cc: "US", node: "us1.node.check-host.net" },  // 洛杉矶
+    { cc: "GB", node: "uk1.node.check-host.net" },  // 伦敦
+    { cc: "DE", node: "de4.node.check-host.net" },  // 法兰克福
+    { cc: "KR", node: null },                        // Globalping 韩国探针
+    { cc: "SG", node: "sg1.node.check-host.net" },  // 新加坡
+];
+
+// check-host 提交：优先指定探针（POST nodes[]），不被接受时退回原版随机 10 探针
+async function submitCheckHost(ctx, target, headers) {
+    const chNodes = REMOTE_COUNTRIES.filter((c) => c.node).map((c) => c.node);
+    const form = "host=" + encodeURIComponent(target)
+        + chNodes.map((n, i) => `&nodes[${i}]=${encodeURIComponent(n)}`).join("");
+    const d = await fetchJSON(ctx, `${CHECK_HOST}/check-tcp`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" },
+        body: form,
+    });
+    if (d && d.ok && d.request_id) return d;
+    const legacy = await fetchJSON(ctx, `${CHECK_HOST}/check-tcp?host=${encodeURIComponent(target)}&max_nodes=10`, { headers });
+    return legacy && legacy.ok && legacy.request_id ? legacy : null;
+}
+
+// 远端探测：六国探针 TCP 探测 host:port，逐国给出延迟（原版流程 + [null] 守卫）
 async function checkRemote(ctx, host, port) {
     const headers = { "Accept": "application/json", "User-Agent": UA };
     const target = host + ":" + port;
-    const d = await fetchJSON(ctx, `${CHECK_HOST}/check-tcp?host=${encodeURIComponent(target)}&max_nodes=10`, { headers });
-    if (!d || !d.ok || !d.request_id) return { ok: false, error: "提交失败" };
 
-    const nodeList = d.nodes || {};
-    const nodeNames = Object.keys(nodeList);
-    const countryMap = {};
-    nodeNames.forEach((n) => {
-        const info = nodeList[n];
-        if (info && info.length >= 1) countryMap[n] = info[0];
-    });
+    // check-host 提交与 Globalping 韩国测量同时发起，并行等结果
+    const [d, krSubmit] = await Promise.all([
+        submitCheckHost(ctx, target, headers),
+        fetchJSON(ctx, GP_API, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "User-Agent": UA },
+            body: JSON.stringify({
+                type: "ping", target: host,
+                measurementOptions: { port: parseInt(port, 10), protocol: "TCP" },
+                locations: [{ country: "KR" }], limit: 2,
+            }),
+        }),
+    ]);
+    await sleep(6000);
 
-    await sleep(3500);
-    const res = await fetchJSON(ctx, `${CHECK_HOST}/check-result/${d.request_id}`, { headers });
-    if (!res) return { ok: false, error: "查询失败" };
+    // check-host 结果按国家归拢（原版读 nr[0].time 未防 [null] 会卡死，已加守卫）
+    const msByCc = {};
+    if (d) {
+        const res = await fetchJSON(ctx, `${CHECK_HOST}/check-result/${d.request_id}`, { headers });
+        if (res) {
+            const nodeList = d.nodes || {};
+            for (const n of Object.keys(nodeList)) {
+                const info = nodeList[n];
+                let cc = info && info.length >= 1 ? String(info[0]).toUpperCase() : "";
+                if (cc === "UK") cc = "GB";
+                if (!cc || msByCc[cc]) continue;
+                const nr = res[n];
+                if (nr && Array.isArray(nr) && nr.length > 0 && nr[0] && nr[0].time !== undefined) {
+                    msByCc[cc] = formatMs(nr[0].time * 1000);
+                }
+            }
+        }
+    }
+
+    // Globalping 韩国探针结果
+    if (krSubmit && krSubmit.id) {
+        const g = await fetchJSON(ctx, `${GP_API}/${krSubmit.id}`, { headers });
+        const r0 = g && g.results && g.results[0];
+        if (r0 && r0.result && r0.result.status === "finished" && r0.result.stats && r0.result.stats.rcv > 0) {
+            msByCc.KR = formatMs(r0.result.stats.avg || 0);
+        }
+    }
 
     let reachable = false;
-    const items = nodeNames.map((n) => {
-        const flag = getFlag(countryMap[n] || "");
-        const nr = res[n];
-        let ms = "--.--ms";
-        // 原版在这里读 nr[0].time 未防 [null]，会抛错卡死；已加守卫
-        if (nr && Array.isArray(nr) && nr.length > 0 && nr[0] && nr[0].time !== undefined) {
-            reachable = true;
-            ms = formatMs(nr[0].time * 1000);
-        }
-        return { flag, ms };
+    const items = REMOTE_COUNTRIES.map((c) => {
+        const ms = msByCc[c.cc];
+        if (ms) reachable = true;
+        return { flag: getFlag(c.cc), ms: ms || "--.--ms" };
     });
     return { ok: reachable, items };
 }
@@ -442,24 +494,27 @@ function panelSections(m, size, detailSize) {
     return els;
 }
 
+// 注意：根节点不要加 flex 撑满的 spacer 把末行顶到底边——内容略高时
+// 最后一行会被卡片边缘截断（v5 真机截图「节点：兜底策略」被切一半）。
+// 末行紧跟内容自然排布，并收紧行距给内容留余量。
 function mediumWidget(m) {
     return root([
         titleRow(m, 13),
-        spacer(9),
-        ...withGaps(panelSections(m, 14, 12), 5),
-        spacer(),
+        spacer(7),
+        ...withGaps(panelSections(m, 14, 12), 4),
+        spacer(6),
         nodeRow(m, 12),
-    ], 14);
+    ], 12);
 }
 
 function largeWidget(m) {
     return root([
         titleRow(m, 15),
-        spacer(11),
-        ...withGaps(panelSections(m, 16, 13), 6),
-        spacer(),
+        spacer(9),
+        ...withGaps(panelSections(m, 16, 13), 5),
+        spacer(7),
         nodeRow(m, 13),
-    ], 16);
+    ], 14);
 }
 
 function smallWidget(m) {
