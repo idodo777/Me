@@ -17,7 +17,7 @@ env_schema:
 scriptings:
   - generic:
       name: "block-check"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check_egern.js?v=52"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check_egern.js?v=53"
       update_interval: 300
       timeout: 60
 

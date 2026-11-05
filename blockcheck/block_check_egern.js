@@ -1,6 +1,6 @@
 /*
  * ============================================================
- * 节点阻断检测（Egern 版 v5.2，功能与原版对齐 + 可视化小组件）
+ * 节点阻断检测（Egern 版 v5.3，功能与原版对齐 + 可视化小组件）
  * ============================================================
  * 原作者：RavelloH（https://github.com/RavelloH）
  * 原版：Quantumult X event-interaction 脚本 block_check.js（同目录存档）
@@ -278,7 +278,7 @@ async function checkRemote(ctx, host, port) {
         if (ms) reachable = true;
         return { flag: getFlag(c.cc), ms: ms || "--.--ms" };
     });
-    return { ok: reachable, items };
+    return { ok: reachable, items, configured: true };
 }
 
 // 国内探测：Globalping 国内三网探针（原版请求体一致）
@@ -303,11 +303,17 @@ async function detect(ctx, cfg) {
     const target = cfg.policy ? `策略「${cfg.policy}」` : "兜底策略";
     const hasAddr = Boolean(cfg.host && cfg.port);
 
-    const [via, direct, remote] = await Promise.all([
+    const [via, direct, probed] = await Promise.all([
         checkVia(ctx, cfg.policy),
         checkDirect(ctx),
         hasAddr ? checkRemote(ctx, cfg.host, cfg.port) : Promise.resolve(null),
     ]);
+    // 远端探测常驻：没填地址时给占位结果（六国旗帜 + --.--ms），面板上标「未设置」，
+    // 不再整段消失 —— 整段缺失会被误读成脚本把功能藏了
+    const remote = probed || {
+        ok: false, configured: false,
+        items: REMOTE_COUNTRIES.map((c) => ({ flag: getFlag(c.cc), ms: "--.--ms" })),
+    };
 
     let gpData = null;
     if (direct.ok && remote && remote.ok && !via.ok) {
@@ -326,12 +332,14 @@ async function detect(ctx, cfg) {
         }
     }
 
-    const nOk = via.ok, dOk = direct.ok, rKnown = remote !== null, rOk = remote ? remote.ok : false;
+    const nOk = via.ok, dOk = direct.ok, rKnown = remote.configured === true, rOk = remote.ok;
     let conclusion, short;
     if (!dOk) {
         conclusion = "⚠️ 本机网络异常"; short = "异常";
     } else if (nOk && (!rKnown || rOk)) {
         conclusion = "✅ 节点正常"; short = "正常";
+    } else if (!nOk && !rKnown) {
+        conclusion = "🚫 节点不可达"; short = "不可达";
     } else if (!nOk && rOk && dOk) {
         if (analysis && analysis.conclusion) {
             conclusion = analysis.conclusion;
@@ -371,11 +379,17 @@ function panelLines(m) {
     }
     lines.push(`本机网络: ${m.direct.ok ? "✅ 正常" : "❌ 异常"}`);
     if (m.remote) {
-        lines.push(`远端探测: ${m.remote.ok ? "✅ 可达" : "❌ 不可达"}`);
-        if (m.remote.items && m.remote.items.length > 0) {
+        if (m.remote.configured === false) {
+            lines.push("远端探测: ⚠️ 未设置");
             lines.push(...pairsText(m.remote.items, (it) => `${it.flag} ${it.ms}`));
-        } else if (m.remote.error) {
-            lines.push(m.remote.error);
+            lines.push("（在模块里填该节点的服务器地址和端口后自动启用）");
+        } else {
+            lines.push(`远端探测: ${m.remote.ok ? "✅ 可达" : "❌ 不可达"}`);
+            if (m.remote.items && m.remote.items.length > 0) {
+                lines.push(...pairsText(m.remote.items, (it) => `${it.flag} ${it.ms}`));
+            } else if (m.remote.error) {
+                lines.push(m.remote.error);
+            }
         }
     }
     if (m.analysis && m.domestic.length > 0) {
@@ -490,6 +504,12 @@ function gridRows(items, size, cols, colored) {
     return rows;
 }
 
+// 远端探测状态词：未填地址时是「未设置」，与真不通区分开
+function remoteStatus(m) {
+    if (!m.remote) return null;
+    return m.remote.configured === false ? "⚠️ 未设置" : (m.remote.ok ? "✅ 可达" : "❌ 不可达");
+}
+
 function viaDetails(m, size) {
     if (!m.via.ok) return [];
     const d = m.via.info;
@@ -510,11 +530,14 @@ function largeWidget(m, xl = false) {
     els.push(...viaDetails(m, det));
     els.push(sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec));
     if (m.remote) {
-        els.push(sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", sec));
+        els.push(sectionRow("远端探测", remoteStatus(m), sec));
         if (m.remote.items && m.remote.items.length > 0) {
             els.push(...gridRows(m.remote.items, det, 2, false));
         } else if (m.remote.error) {
             els.push(hrow([T(m.remote.error, det, C.faint, "regular")], det));
+        }
+        if (m.remote.configured === false) {
+            els.push(hrow([T("在模块里填该节点的服务器地址和端口后自动启用", 11, C.faint, "regular", { minScale: 0.7 })], 11, { padding: [0, 0, 0, 10] }));
         }
     }
     if (m.analysis && m.domestic.length > 0) {
@@ -540,13 +563,12 @@ function largeWidget(m, xl = false) {
     return root(els, [12, 14, 12, 14]);
 }
 
-/* 中号：可用高约 135pt，装不下完整面板 —— 精简版面板：
- * 无单独标题行（时间并到节点行右侧）；节点代理行右侧带出口 IP；
- * 有远端时六国旗帜 3 列 × 2 行；国内探测在中号只体现在结论里（放不下单独一行）；
- * 无远端时补位置/ISP 明细行（正好填满）。 */
+/* 中号：可用高约 139pt —— 精简版面板：标题行 + 节点代理（右侧出口 IP）
+ * + 本机网络 + 远端探测（六国旗帜 3 列 × 2 行，未设置时占位）+ 单行结论
+ * + 节点行（右侧时间）。总高恒定约 143pt，明细（位置/ISP、国内网格）在大号看。 */
 function mediumWidget(m) {
     const sec = 12, det = 11, concl = 13.5;
-    const els = [];
+    const els = [titleRow(m, 11.5)];
     // 节点代理（通时右侧带出口 IP）
     els.push(hrow([
         T("节点代理", sec, C.ink, "bold"),
@@ -555,22 +577,20 @@ function mediumWidget(m) {
         m.via.ok ? T(m.via.info.query, det, C.soft, "medium", { minScale: 0.6 }) : null,
     ], sec, { gap: 6 }));
     els.push(sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec));
+    // 远端探测常驻（未填地址时旗帜占位 + 未设置）；明细（位置/ISP）在大号与通知里
     if (m.remote) {
-        els.push(sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", sec));
+        els.push(sectionRow("远端探测", remoteStatus(m), sec));
         if (m.remote.items && m.remote.items.length > 0) {
-            els.push(...gridRows(m.remote.items, 10.5, 3, false));
+            els.push(...gridRows(m.remote.items, 10, 3, false));
         }
-    } else if (m.via.ok) {
-        const d = m.via.info;
-        els.push(detailRow("位置", [d.country, d.regionName, d.city].filter(Boolean).join(" - "), det));
-        els.push(detailRow("ISP", d.isp || "未知", det));
     }
+    // 中号结论只占一行（长结论靠 minScale 缩放），保证总高恒定不溢出
     els.push({
-        ...T(m.conclusion, concl, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
-        height: LH(concl) * (m.conclusion.length > 15 ? 2 : 1),
+        ...T(m.conclusion, concl, C.ink, "bold", { maxLines: 1, minScale: 0.55 }),
+        height: LH(concl),
     });
     els.push(nodeRow(m, det, true));
-    return root(els, [9, 12, 9, 12]);
+    return root(els, [8, 12, 8, 12]);
 }
 
 function smallWidget(m) {
@@ -583,7 +603,7 @@ function smallWidget(m) {
         els.push(hrow([T(`${getFlag(m.via.info.countryCode)} ${m.via.info.query}`, 12, C.soft, "regular", { minScale: 0.6 })], 12));
     }
     if (m.remote) {
-        els.push(sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", 12));
+        els.push(sectionRow("远端探测", remoteStatus(m), 12));
     }
     els.push(spacer());
     els.push(nodeRow(m, 11));
