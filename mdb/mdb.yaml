@@ -1,0 +1,21 @@
+name: "买单吧开屏广告拦截"
+description: "拦截开屏广告"
+author: "idodo777"
+homepage: "https://github.com/idodo777/Me"
+
+scriptings:
+  - http_response:
+      name: "买单吧开屏广告"
+      match: "^https?://creditcard\\.bankcomm\\.(cn|com)/tofimg/bucket-pj-btss-tfcn-dmz/OSS-F/.+"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/mdb/mdb.js"
+      body_required: true
+      binary_body: true
+      max_size: 33554432
+      timeout: 20
+
+mitm:
+  hostnames:
+    - "creditcardapp.bankcomm.cn"
+    - "creditcardapp.bankcomm.com"
+    - "creditcard.bankcomm.cn"
+    - "creditcard.bankcomm.com"
