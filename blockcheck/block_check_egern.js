@@ -1,27 +1,23 @@
 /*
  * ============================================================
- * 节点阻断检测（Egern 版 v3，带可视化小组件）
+ * 节点阻断检测（Egern 版 v4，带可视化小组件）
  * ============================================================
- * 思路源自 RavelloH 的 QuanX 脚本 block_check.js（原版同目录存档）：
- * 对比「经代理出口」和「本机直连」两条路，判断当前上网通道是否正常。
+ * 源自 RavelloH 的 QuanX 脚本 block_check.js（原版同目录存档）。
  *
- * 模式照 vfelix7「IP 纯净度」小组件（用户指定参照）：
- * - 零填写可用：什么都不设置时，检测请求不带 policy，跟随 Egern
- *   分流规则，最终走 default 规则的兜底策略 —— 测的就是你当下
- *   实际在用的那个出口。
- * - 唯一参数 POLICY（模块里叫「检测策略」，env_schema 可视化填写）：
- *   填策略组或节点名只测它，留空测兜底。
- * - 双模式输出：作为小组件刷新时（ctx.widgetFamily 存在）返回
- *   小组件 DSL，把结果画出来；在脚本列表里手动运行时发通知。
- * - v1 要求手填服务器地址/端口供海外探针定位阻断来源，用户认为
- *   还要自己查地址太傻，已去掉；代价：经策略不通时只能给出
- *   「节点离线 / 被阻断 / 策略名填错」几种可能，不再细分
- *   GFW 全局阻断还是运营商拦截。
+ * 检测方式（零填写）：对比「经代理出口」与「本机直连」两条路。
+ * 什么都不设置时，检测请求不带 policy，跟随 Egern 分流规则，
+ * 最终走 default 规则的兜底策略 —— 测的就是当下实际在用的出口。
+ * 唯一参数 POLICY（模块里叫「检测策略」）：填策略组或节点名只测它。
  *
- * 结论：
- *   ✅ 出口正常        经出口能通，附出口 IP / 地区 / 运营商
- *   ⚠️ 经策略不通      本机直连正常，是代理这条路的问题
- *   ❌ 本机网络异常    直连也不通，先查本机网络
+ * 呈现方式：信息结构按原版在 QuanX 里的 HTML 面板设计 ——
+ * 分段报告（节点代理 / 本机网络 / 诊断结论 / 节点），小组件与
+ * 手动运行的通知共用同一套内容；小组件的机制与 DSL 写法参照
+ * vfelix7「IP 纯净度」模块，版式按本脚本自己的数据设计。
+ *
+ * v1 曾要求手填服务器地址/端口供海外探针（远端探测、国内探测）
+ * 定位阻断来源，用户认为还要自己查地址太傻，已去掉。因此原版
+ * 靠远端探测区分的「节点离线」与「被阻断」，在本版合并为
+ * 「节点不可达（疑似离线或被阻断）」，不硬下细分结论。
  * ============================================================
  */
 
@@ -30,15 +26,12 @@ const TIMEOUT = 8000;
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 const REFRESH_MINUTES = 10;
 
-// 小组件配色（浅/深两套，照参照脚本的写法）
 const C = {
     bg: { light: "#FFFFFF", dark: "#161B22" },
     ink: { light: "#1F2328", dark: "#E6EDF3" },
     soft: { light: "#59636E", dark: "#8B949E" },
     faint: { light: "#818B98", dark: "#6E7681" },
-    good: { light: "#1F9D55", dark: "#48C78E" },
-    warn: { light: "#B4600F", dark: "#F0A040" },
-    bad: { light: "#D73A49", dark: "#FE6685" },
+    link: { light: "#467fcf", dark: "#6ea8fe" },
 };
 
 /* ---------- 小工具 ---------- */
@@ -49,13 +42,6 @@ function getFlag(countryCode) {
     if (code === "TW") return "🇹🇼";
     if (!/^[A-Z]{2}$/.test(code)) return "🌐";
     return String.fromCodePoint(...[...code].map((c) => 127397 + c.charCodeAt(0)));
-}
-
-function placeOf(info) {
-    if (!info) return "";
-    const parts = [info.country, info.regionName, info.city]
-        .filter((v, i, a) => v && a.indexOf(v) === i);
-    return parts.join(" ");
 }
 
 function clock() {
@@ -82,7 +68,7 @@ async function checkLine(ctx, policy) {
     }
 }
 
-/* ---------- 检测并整理成结果模型 ---------- */
+/* ---------- 检测并整理成结果模型（结论用词与原版面板一致） ---------- */
 
 async function detect(ctx, policy) {
     const target = policy ? `策略「${policy}」` : "兜底策略";
@@ -93,53 +79,47 @@ async function detect(ctx, policy) {
 
     const m = { target, time: clock(), via, direct, advice: "" };
 
-    if (via.ok) {
-        m.status = "ok";
-        m.title = "出口正常";
-        m.short = "正常";
-        m.icon = "checkmark.circle.fill";
-        m.color = C.good;
-    } else if (direct.ok) {
-        m.status = "blocked";
-        m.title = `经${target}不通`;
-        m.short = "不通";
-        m.icon = "exclamationmark.triangle.fill";
-        m.color = C.warn;
-        m.advice = policy
-            ? "节点离线、被运营商/GFW 阻断，或策略名填错"
-            : "兜底选中的节点离线或被阻断，换个节点再测";
-    } else {
+    if (!direct.ok) {
         m.status = "down";
-        m.title = "本机网络异常";
+        m.emoji = "⚠️";
+        m.conclusion = "本机网络异常";
         m.short = "异常";
-        m.icon = "xmark.octagon.fill";
-        m.color = C.bad;
-        m.advice = "直连也不通，先检查 Wi-Fi / 蜂窝";
+    } else if (via.ok) {
+        m.status = "ok";
+        m.emoji = "✅";
+        m.conclusion = "节点正常";
+        m.short = "正常";
+    } else {
+        m.status = "blocked";
+        m.emoji = "🚫";
+        m.conclusion = "节点不可达";
+        m.short = "不可达";
+        m.advice = policy
+            ? "疑似节点离线或被运营商/GFW 阻断，也可能是策略名填错"
+            : "疑似节点离线或被运营商/GFW 阻断，换个节点再测";
     }
     return m;
 }
 
-// 通知用的文字行（手动运行时）
-function notifyLines(m) {
+// 面板式文字行：通知与日志共用，结构同原版（节点代理 / 本机网络 / 诊断结论 / 节点）
+function panelLines(m) {
     const lines = [];
-    if (m.status === "ok") {
-        const info = m.via.info;
-        lines.push(`出口: ${getFlag(info.countryCode)} ${info.query} · ${placeOf(info)}`);
-        if (info.isp) lines.push(`运营商: ${info.isp}`);
-        lines.push(`耗时: ${m.via.ms}ms`);
-    } else if (m.status === "blocked") {
-        lines.push(`经${m.target}访问失败（${m.via.ms}ms）`);
-        lines.push(`本机直连正常: ${getFlag(m.direct.info.countryCode)} ${m.direct.info.query}${m.direct.info.isp ? " · " + m.direct.info.isp : ""}`);
-        lines.push(`可能：${m.advice}`);
-    } else {
-        lines.push(`经${m.target}失败，本机直连也失败`);
-        lines.push(m.advice);
+    lines.push(`节点代理: ${m.via.ok ? "✅ 正常" : "❌ 不可达"}`);
+    if (m.via.ok) {
+        const d = m.via.info;
+        lines.push(`IP: ${d.query}`);
+        lines.push(`位置: ${[d.country, d.regionName, d.city].filter(Boolean).join(" - ")}`);
+        lines.push(`ISP: ${d.isp || "未知"}`);
     }
-    lines.push(`检测: ${m.target}`);
+    lines.push(`本机网络: ${m.direct.ok ? "✅ 正常" : "❌ 异常"}`);
+    lines.push("📋 诊断结论");
+    lines.push(`${m.emoji} ${m.conclusion}`);
+    if (m.advice) lines.push(m.advice);
+    lines.push(`节点: ${m.target}`);
     return lines;
 }
 
-/* ---------- 小组件 DSL（元素写法照参照脚本） ---------- */
+/* ---------- 小组件 DSL ---------- */
 
 function T(text, size, color, weight = "regular", extra = {}) {
     const el = { type: "text", text: String(text), font: { size, weight }, maxLines: 1 };
@@ -151,22 +131,8 @@ function row(children, extra = {}) {
     return { type: "stack", direction: "row", alignItems: "center", children: children.filter(Boolean), ...extra };
 }
 
-function col(children, extra = {}) {
-    return { type: "stack", direction: "column", alignItems: "start", children: children.filter(Boolean), ...extra };
-}
-
 function spacer(length) {
     return length === undefined ? { type: "spacer" } : { type: "spacer", length };
-}
-
-function icon(name, size, color) {
-    const el = { type: "image", src: `sf-symbol:${name}`, width: size, height: size };
-    if (color) el.color = color;
-    return el;
-}
-
-function center(child) {
-    return row([spacer(), child, spacer()]);
 }
 
 function refreshAt() {
@@ -184,149 +150,109 @@ function root(children, padding) {
     };
 }
 
-function exitLine(m, size) {
-    if (m.status !== "ok") return null;
-    const info = m.via.info;
-    return T(`${getFlag(info.countryCode)} ${info.query}`, size, C.ink, "bold", { minScale: 0.6 });
-}
-
-function metaLine(m, size) {
-    if (m.status !== "ok") return null;
-    const info = m.via.info;
-    const text = [placeOf(info), info.isp].filter(Boolean).join(" · ");
-    return text ? T(text, size, C.soft, "regular", { minScale: 0.6 }) : null;
-}
-
-function footRow(m, size) {
+// 段标题行：加粗标签 + 状态，如「节点代理 ✅ 正常」
+function sectionRow(label, status, size) {
     return row([
-        T(`检测：${m.target}`, size, C.faint, "medium", { minScale: 0.7 }),
-        spacer(),
-        m.status === "ok" ? T(`${m.via.ms}ms`, size, C.faint, "medium") : null,
-    ], { gap: 5 });
+        T(label, size, C.ink, "bold"),
+        spacer(6),
+        T(status, size, C.ink, "semibold"),
+    ]);
 }
 
-// 顶行照参照效果图：国旗 国家 城市 …… 时间；出口不通时没有出口信息，改放检测目标
-function topRow(m, size) {
-    if (m.status === "ok") {
-        const info = m.via.info;
-        return row([
-            T(getFlag(info.countryCode), size),
-            T(info.country || "", size, C.ink, "semibold"),
-            info.city ? T(info.city, size, C.soft, "regular", { minScale: 0.6 }) : null,
-            spacer(),
-            T(m.time, size - 2, C.faint, "medium"),
-        ], { gap: 5 });
-    }
+// 明细行：缩进的「标签: 值」，如「IP: 1.2.3.4」
+function detailRow(label, value, size) {
     return row([
-        T("🌐", size),
-        T(m.target, size, C.ink, "semibold"),
+        spacer(10),
+        T(label, size, C.soft, "bold"),
+        T(`: ${value}`, size, C.soft, "regular", { minScale: 0.6 }),
+    ]);
+}
+
+function titleRow(m, size) {
+    return row([
+        T("🌐 节点阻断检测", size, C.soft, "semibold"),
         spacer(),
         T(m.time, size - 2, C.faint, "medium"),
     ], { gap: 5 });
 }
 
-// 「标签 + 值」一行（照参照脚本 field 的写法）：标签浅灰固定宽，值带 flex 靠左
-function fieldRow(label, value, size = 11) {
+function nodeRow(m, size) {
     return row([
-        { type: "stack", direction: "row", width: 34, children: [T(label, size, C.faint, "medium"), spacer()] },
-        { ...value, flex: 1 },
-    ], { gap: 6 });
-}
-
-// 右栏的状态徽：大图标 + 结论词，颜色表达状态（照参照图右侧色条的位置）
-function statusBadge(m, iconSize, fontSize) {
-    return {
-        type: "stack", direction: "column", alignItems: "center",
-        children: [
-            icon(m.icon, iconSize, m.color),
-            spacer(5),
-            T(m.title, fontSize, m.color, "semibold", { minScale: 0.6 }),
-            m.status === "ok" ? T(`${m.via.ms}ms`, fontSize - 2, C.faint, "medium") : null,
-        ].filter(Boolean),
-    };
-}
-
-// 底行照参照图：左边直连状态（图标着色、文字正文色），右边检测目标
-function bottomRow(m, size) {
-    const d = m.direct;
-    return row([
-        icon(d.ok ? "checkmark.seal.fill" : "xmark.seal.fill", size, d.ok ? C.good : C.bad),
-        T(d.ok ? "直连正常" : "直连失败", size + 1, C.ink, "medium"),
-        spacer(),
-        T(m.target, size, C.faint, "medium", { minScale: 0.7 }),
-    ], { gap: 4 });
-}
-
-// 中号照参照效果图的版式：顶行地区时间；中间左栏大 IP + 标签行，右栏状态徽；底行直连与目标
-function mediumWidget(m) {
-    const info = m.status === "ok" ? m.via.info : null;
-    const left = col([
-        info
-            ? T(info.query, 20, C.ink, "bold", { minScale: 0.55 })
-            : T(m.title, 20, C.ink, "bold", { minScale: 0.6 }),
-        spacer(10),
-        info
-            ? fieldRow("运营商", T(info.isp || "未知", 11, C.ink, "semibold", { minScale: 0.6 }))
-            : fieldRow("直连", T(m.direct.ok ? m.direct.info.query : "失败", 11, C.ink, "semibold", { minScale: 0.6 })),
-        spacer(6),
-        info
-            ? fieldRow("出口", T(placeOf(info), 11, C.ink, "semibold", { minScale: 0.6 }))
-            : T(m.advice, 11, C.soft, "regular", { maxLines: 2, minScale: 0.7 }),
+        T("节点", size, C.soft, "bold"),
+        T(`: ${m.target}`, size, C.link, "regular", { minScale: 0.7 }),
     ]);
+}
+
+function viaDetails(m, size) {
+    if (!m.via.ok) return [];
+    const d = m.via.info;
+    return [
+        detailRow("IP", d.query, size),
+        detailRow("位置", [d.country, d.regionName, d.city].filter(Boolean).join(" - "), size),
+        detailRow("ISP", d.isp || "未知", size),
+    ];
+}
+
+function mediumWidget(m) {
     return root([
-        topRow(m, 13),
+        titleRow(m, 13),
+        spacer(9),
+        sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", 14),
+        ...viaDetails(m, 12).flatMap((el) => [spacer(3), el]),
+        spacer(8),
+        sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", 14),
+        spacer(8),
+        T("📋 诊断结论", 14, C.ink, "bold"),
+        spacer(3),
+        T(`${m.emoji} ${m.conclusion}`, 17, C.ink, "bold", { minScale: 0.7 }),
+        m.advice ? spacer(3) : null,
+        m.advice ? T(m.advice, 11, C.faint, "regular", { maxLines: 2, minScale: 0.7 }) : null,
         spacer(),
-        row([{ ...left, flex: 40 }, { ...statusBadge(m, 40, 13), flex: 37 }], { gap: 14, alignItems: "start" }),
-        spacer(),
-        bottomRow(m, 11),
+        nodeRow(m, 12),
     ], 14);
+}
+
+function largeWidget(m) {
+    const directDetail = m.direct.ok
+        ? [spacer(3), detailRow("直连IP", `${m.direct.info.query}${m.direct.info.isp ? " · " + m.direct.info.isp : ""}`, 13)]
+        : [];
+    return root([
+        titleRow(m, 15),
+        spacer(11),
+        sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", 16),
+        ...viaDetails(m, 13).flatMap((el) => [spacer(4), el]),
+        spacer(10),
+        sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", 16),
+        ...directDetail,
+        spacer(10),
+        T("📋 诊断结论", 16, C.ink, "bold"),
+        spacer(4),
+        T(`${m.emoji} ${m.conclusion}`, 20, C.ink, "bold", { minScale: 0.7 }),
+        m.advice ? spacer(4) : null,
+        m.advice ? T(m.advice, 13, C.faint, "regular", { maxLines: 2, minScale: 0.7 }) : null,
+        spacer(),
+        nodeRow(m, 13),
+    ], 16);
 }
 
 function smallWidget(m) {
     return root([
-        row([icon(m.icon, 16, m.color), T(m.title, 15, C.ink, "bold", { minScale: 0.6 })], { gap: 5 }),
+        titleRow(m, 11),
         spacer(8),
-        exitLine(m, 13),
-        metaLine(m, 11),
-        m.status !== "ok" ? T(m.advice, 11, C.soft, "regular", { maxLines: 3, minScale: 0.7 }) : null,
+        T(`${m.emoji} ${m.conclusion}`, 16, C.ink, "bold", { minScale: 0.65 }),
+        spacer(7),
+        sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", 12),
+        spacer(4),
+        m.via.ok
+            ? T(`${getFlag(m.via.info.countryCode)} ${m.via.info.query}`, 12, C.soft, "regular", { minScale: 0.6 })
+            : T(m.advice, 11, C.soft, "regular", { maxLines: 3, minScale: 0.7 }),
         spacer(),
-        footRow(m, 10),
+        nodeRow(m, 11),
     ], 12);
 }
 
-// 大号与中号同版式放大，并把直连明细整行列出
-function largeWidget(m) {
-    const info = m.status === "ok" ? m.via.info : null;
-    const directText = m.direct.ok
-        ? `本机直连：${getFlag(m.direct.info.countryCode)} ${m.direct.info.query}${m.direct.info.isp ? " · " + m.direct.info.isp : ""}`
-        : "本机直连：失败";
-    const left = col([
-        info
-            ? T(info.query, 24, C.ink, "bold", { minScale: 0.55 })
-            : T(m.title, 24, C.ink, "bold", { minScale: 0.6 }),
-        spacer(12),
-        info ? fieldRow("运营商", T(info.isp || "未知", 13, C.ink, "semibold", { minScale: 0.6 })) : null,
-        info ? spacer(7) : null,
-        info ? fieldRow("出口", T(placeOf(info), 13, C.ink, "semibold", { minScale: 0.6 })) : null,
-        info ? spacer(7) : null,
-        info ? fieldRow("耗时", T(`${m.via.ms}ms`, 13, C.ink, "semibold")) : null,
-        !info ? T(m.advice, 13, C.soft, "regular", { maxLines: 2, minScale: 0.7 }) : null,
-    ]);
-    return root([
-        topRow(m, 15),
-        spacer(),
-        row([{ ...left, flex: 40 }, { ...statusBadge(m, 54, 15), flex: 37 }], { gap: 14, alignItems: "start" }),
-        spacer(),
-        T(directText, 13, C.soft, "regular", { minScale: 0.7 }),
-        spacer(8),
-        bottomRow(m, 12),
-    ], 16);
-}
-
 function inlineWidget(m) {
-    const ip = m.status === "ok" ? ` ${m.via.info.query}` : "";
-    const emoji = m.status === "ok" ? "✅" : m.status === "blocked" ? "⚠️" : "❌";
-    return { type: "widget", refreshAfter: refreshAt(), children: [T(`${emoji} ${m.title}${ip}`, 12, null)] };
+    return { type: "widget", refreshAfter: refreshAt(), children: [T(`${m.emoji} ${m.conclusion}`, 12, null)] };
 }
 
 function circularWidget(m) {
@@ -338,8 +264,8 @@ function circularWidget(m) {
             type: "stack", direction: "column", alignItems: "center", flex: 1,
             children: [
                 spacer(),
-                center(icon(m.icon, 22, null)),
-                center(T(m.short, 10, null, "medium")),
+                row([spacer(), T(m.emoji, 20, null), spacer()]),
+                row([spacer(), T(m.short, 10, null, "medium"), spacer()]),
                 spacer(),
             ],
         }],
@@ -352,11 +278,9 @@ function rectangularWidget(m) {
         gap: 2,
         refreshAfter: refreshAt(),
         children: [
-            row([icon(m.icon, 12, null), T(m.title, 13, null, "semibold", { minScale: 0.6 })], { gap: 4 }),
-            m.status === "ok"
-                ? T(`${getFlag(m.via.info.countryCode)} ${m.via.info.query}`, 12, null, "regular", { minScale: 0.6 })
-                : T(m.advice, 12, null, "regular", { maxLines: 2, minScale: 0.7 }),
-            T(`检测：${m.target}`, 11, null, "regular", { minScale: 0.7 }),
+            T(`${m.emoji} ${m.conclusion}`, 13, null, "semibold", { minScale: 0.6 }),
+            T(`节点代理: ${m.via.ok ? "✅ 正常" : "❌ 不可达"}`, 12, null, "regular", { minScale: 0.7 }),
+            T(`节点: ${m.target}`, 11, null, "regular", { minScale: 0.7 }),
         ],
     };
 }
@@ -375,10 +299,9 @@ function widgetFor(family, m) {
 
 function errorWidget(family, message) {
     const m = {
-        status: "down", title: "检测出错", short: "出错",
-        icon: "exclamationmark.triangle.fill", color: C.bad,
+        status: "down", emoji: "🛑", conclusion: "检测出错", short: "出错",
         target: "兜底策略", time: clock(), advice: String(message || "").slice(0, 60),
-        via: { ok: false, ms: 0 }, direct: { ok: false },
+        via: { ok: false }, direct: { ok: false },
     };
     return widgetFor(family, m);
 }
@@ -392,14 +315,12 @@ export default async function (ctx) {
 
     try {
         const m = await detect(ctx, policy);
-        console.log("[BLOCK-CHECK] " + m.title + " / " + m.target);
+        console.log("[BLOCK-CHECK]\n" + panelLines(m).join("\n"));
         if (family) return widgetFor(family, m);
-        const body = (m.status === "ok" ? "✅ " : m.status === "blocked" ? "⚠️ " : "❌ ")
-            + m.title + "\n" + notifyLines(m).join("\n");
-        await ctx.notify({ title: "🌐 节点阻断检测", body });
+        await ctx.notify({ title: "🌐 节点阻断检测", body: panelLines(m).join("\n") });
     } catch (error) {
         console.log("[BLOCK-CHECK] ERROR = " + error);
         if (family) return errorWidget(family, error && error.message);
-        await ctx.notify({ title: "🌐 节点阻断检测", body: "检测出错：" + error });
+        await ctx.notify({ title: "🌐 节点阻断检测", body: "🛑 检测出错：" + error });
     }
 }
