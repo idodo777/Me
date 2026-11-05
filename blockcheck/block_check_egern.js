@@ -1,45 +1,35 @@
 /*
  * ============================================================
- * 节点阻断检测（Egern 版 v5.5，功能与原版对齐 + 可视化小组件）
+ * 节点阻断检测（Egern 版 v6.0，可视化小组件）
  * ============================================================
  * 原作者：RavelloH（https://github.com/RavelloH）
  * 原版：Quantumult X event-interaction 脚本 block_check.js（同目录存档）
- * 功能：检测节点是真挂了，还是被 GFW / 运营商屏蔽。
  *
- * 检测方法（与原版一致，多方交叉验证）：
+ * 检测逻辑（v6.0 按使用者的思路重构：方向改为「节点出站」）：
+ * 这个模块回答一个问题——当前节点（兜底策略选中的出口，或模块里
+ * 指定的策略）能不能访问指定国家、延迟多少。检测时让节点自己
+ * 主动向六个国家的目标端点各发一次请求，计时即延迟：
  * 1) 节点代理 —— 经策略访问 ip-api.com，通不通、出口是哪；
  * 2) 本机网络 —— 本机直连 ip-api.com，排除本机断网；
- * 3) 远端探测 —— 固定六国探针 TCP 探测节点服务器地址，逐国列出
- *    延迟（哪国线路不通一目了然）：日本、美国、英国、德国、韩国、
- *    新加坡。五国用 check-host 指定探针；check-host 没有韩国探针，
- *    韩国用 Globalping 的韩国探针补齐；
- * 4) 国内探测 —— 仅当「海外可达 + 国内经节点不通」时触发：
- *    Globalping 国内电信/联通/移动探针定位阻断来源
- *    （三家全不通 = GFW 全局阻断；某家不通 = 运营商级拦截；
- *      三家全通 = 非拦截，查客户端配置）。
- * 结论树与原版一致：节点正常 / 节点离线 / 疑似被运营商/GFW 阻断 /
- * 本机网络异常 / 数据不完整（+ 国内探测的三种细分结论）。
+ * 3) 远端探测 —— 经同一策略依次请求日本、美国、英国、德国、韩国、
+ *    新加坡的目标端点（Google 各国域名的 generate_204，已实测
+ *    全部返回 204），逐国给出延迟；请求失败或超时即「中断」，
+ *    表示这个节点到达不了那个国家。
+ * 结果只有两种：延迟高低，或中断。不存在第三种状态。
  *
- * 与原版的差异（平台机制所限，已尽量等价）：
- * - 原版靠「长按节点」自动拿到服务器地址；Egern 没有读节点配置的
- *   接口（API 已逐项核对）。本版用三级来源自动凑目标：手动填的
- *   地址优先；没填时用本次出口 IP + 443 自动探测（机场节点多为
- *   服务器即出口、端口 443）；节点挂了则用上次成功缓存的出口 IP。
- *   自动模式防误报：节点通而六国全不通 = 自动目标不对（中转入口
- *   或非 443 端口），标「未命中」且不参与结论，不误报被墙。
- *   只有「出口从未成功过又没填地址」时远端探测才显示未设置。
- * - 原版结果是 QuanX 的 HTML 面板；本版呈现为同结构文字面板
- *   （通知）与 Egern 小组件，段落、顺序、用词都按原版面板。
- * - 移植时修掉原版一个 bug：check-host 对探测失败的节点返回
- *   [null]，原版读 nr[0].time 会抛错且无人接住，脚本无声卡死
- *   （恰好发生在「节点离线」场景）；本版已加空值守卫。
- * - check-host / Globalping 请求加浏览器 UA，避免被机器人过滤误拦。
+ * 与原版（及本模块 v5 以前）的区别：
+ * - 原版测的是反方向：让六国探针从外面连进来打节点服务器，所以
+ *   必须知道服务器地址，测的也是「服务器的门牌能不能被敲开」。
+ *   v6 改成节点出站实测，不再需要服务器地址，也就没有地址填错、
+ *   中转入口对不上导致的假阴性（v5 的「未命中」即源于此）。
+ * - 随之去掉：check-host 入站探测、Globalping 国内探测、服务器
+ *   地址/端口参数。节点本身不可达时只报「节点不可达」，不再细
+ *   分是 GFW 阻断还是离线（出站逻辑下无法、也不需要区分）。
+ * - 延迟为手机端完整往返（本机 → 节点 → 目标），即实际体感延迟。
  * ============================================================
  */
 
 const IP_API = "http://ip-api.com/json?lang=zh-CN";
-const CHECK_HOST = "https://check-host.net";
-const GP_API = "https://api.globalping.io/v1/measurements";
 const TIMEOUT = 8000;
 const UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148";
 const REFRESH_MINUTES = 10;
@@ -55,9 +45,7 @@ const C = {
     bad: { light: "#D73A49", dark: "#FE6685" },
 };
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/* ---------- 与原版逐字一致的纯逻辑 ---------- */
+/* ---------- 基础工具 ---------- */
 
 function getFlag(cc) {
     if (!cc || cc.length !== 2) return "🌍";
@@ -81,100 +69,12 @@ function formatMs(ms) {
     }
 }
 
-function classifyISP(network) {
-    const n = String(network || "").toLowerCase();
-    if (n.indexOf("unicom") !== -1 || n.indexOf("china unicom") !== -1) return "中国联通";
-    if (n.indexOf("chinanet") !== -1 || n.indexOf("telecom") !== -1 || n.indexOf("china telecom") !== -1) return "中国电信";
-    if (n.indexOf("mobile") !== -1 || n.indexOf("china mobile") !== -1) return "中国移动";
-    return null;
-}
-
-function cnCity(en) {
-    const map = {
-        "Beijing": "北京", "Shanghai": "上海", "Guangzhou": "广州",
-        "Shenzhen": "深圳", "Chengdu": "成都", "Hangzhou": "杭州",
-        "Wuhan": "武汉", "Nanjing": "南京", "Tianjin": "天津",
-        "Xi'an": "西安", "Changsha": "长沙", "Zhengzhou": "郑州",
-        "Jinan": "济南", "Qingdao": "青岛", "Dalian": "大连",
-        "Xiamen": "厦门", "Fuzhou": "福州", "Kunming": "昆明",
-        "Hefei": "合肥", "Ningbo": "宁波", "Suzhou": "苏州",
-        "Wuxi": "无锡", "Changzhou": "常州", "Guilin": "桂林",
-        "Nanning": "南宁", "Haikou": "海口", "Sanya": "三亚",
-        "Guiyang": "贵阳", "Lanzhou": "兰州", "Urumqi": "乌市",
-        "Hohhot": "呼市", "Harbin": "哈市", "Changchun": "长春",
-        "Shenyang": "沈阳", "Shijiazhuang": "石市", "Taiyuan": "太原",
-        "Xuzhou": "徐州", "Yancheng": "盐城", "Taishan": "台山",
-        "Nanchang": "南昌", "Foshan": "佛山", "Dongguan": "东莞",
-        "Zhuhai": "珠海", "Zhongshan": "中山", "Huizhou": "惠州",
-    };
-    return map[en] || en;
-}
-
-function analyzeBlockSource(gpData) {
-    const results = gpData && gpData.results;
-    if (!results) return null;
-
-    const ispGroups = {};
-    for (let i = 0; i < results.length; i++) {
-        const r = results[i];
-        const isp = classifyISP(r.probe.network);
-        if (!isp) continue;
-
-        if (!ispGroups[isp]) ispGroups[isp] = { probes: [], reachable: false };
-
-        const res = r.result || {};
-        let ok = false;
-        let ms = "--.--ms";
-        const stats = res.stats;
-        if (res.status === "finished" && stats) {
-            ok = stats.rcv > 0;
-            ms = ok ? formatMs(stats.avg || 0) : "--.--ms";
-        }
-        if (ok) ispGroups[isp].reachable = true;
-
-        ispGroups[isp].probes.push({ city: cnCity(r.probe.city), ok, ms });
-    }
-
-    const reachableIsps = [], blockedIsps = [];
-    for (const key of Object.keys(ispGroups)) {
-        const g = ispGroups[key];
-        if (g.probes.length === 0) continue;
-        if (g.reachable) reachableIsps.push(key); else blockedIsps.push(key);
-    }
-
-    let conclusion;
-    if (reachableIsps.length === 0 && blockedIsps.length === 0) {
-        return { ispGroups, conclusion: null };
-    } else if (reachableIsps.length === 0) {
-        conclusion = "🚫 GFW 全局阻断 — 国内三大运营商均无法访问";
-    } else if (blockedIsps.length > 0) {
-        conclusion = "🚫 运营商级拦截 — " + blockedIsps.join("、") + " 不可达，" + reachableIsps.join("、") + " 正常";
-    } else {
-        conclusion = "✅ 国内三大运营商全部可达，非 GFW 或运营商拦截，请检查客户端配置";
-    }
-
-    return { ispGroups, conclusion };
-}
-
-/* ---------- 网络小工具 ---------- */
-
-async function fetchJSON(ctx, url, options = {}) {
-    try {
-        const method = (options.method || "GET").toUpperCase();
-        const opts = { timeout: TIMEOUT, headers: options.headers || {}, body: options.body };
-        const res = method === "POST" ? await ctx.http.post(url, opts) : await ctx.http.get(url, opts);
-        return await res.json();
-    } catch {
-        return null;
-    }
-}
-
 function clock() {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
 
-/* ---------- 四路检测 ---------- */
+/* ---------- 检测 ---------- */
 
 // 节点代理：policy 为空时不带 policy 选项 —— 跟随分流规则（兜底策略）
 async function checkVia(ctx, policy) {
@@ -201,210 +101,62 @@ async function checkDirect(ctx) {
     }
 }
 
-// 远端探测的固定国家阵容（顺序按用户指定）：日本、美国、英国、德国、韩国、新加坡。
-// 五国用 check-host 的指定探针；check-host 没有韩国探针（2026-11-05 实测
-// 其 55 个探针无 KR），韩国改用 Globalping 的韩国探针补齐，延迟口径一致。
-const REMOTE_COUNTRIES = [
-    { cc: "JP", node: "jp1.node.check-host.net" },  // 东京
-    { cc: "US", node: "us1.node.check-host.net" },  // 洛杉矶
-    { cc: "GB", node: "uk1.node.check-host.net" },  // 伦敦
-    { cc: "DE", node: "de4.node.check-host.net" },  // 法兰克福
-    { cc: "KR", node: null },                        // Globalping 韩国探针
-    { cc: "SG", node: "sg1.node.check-host.net" },  // 新加坡
+// 六国目标端点（顺序按用户指定）：Google 各国域名的 generate_204，
+// 2026-11-05 实测六个全部返回 HTTP 204、无响应体、全球稳定。
+const PROBE_COUNTRIES = [
+    { cc: "JP", name: "日本", url: "https://www.google.co.jp/generate_204" },
+    { cc: "US", name: "美国", url: "https://www.google.com/generate_204" },
+    { cc: "GB", name: "英国", url: "https://www.google.co.uk/generate_204" },
+    { cc: "DE", name: "德国", url: "https://www.google.de/generate_204" },
+    { cc: "KR", name: "韩国", url: "https://www.google.co.kr/generate_204" },
+    { cc: "SG", name: "新加坡", url: "https://www.google.com.sg/generate_204" },
 ];
 
-// check-host 提交：优先指定探针（POST nodes[]），不被接受时退回原版随机 10 探针
-async function submitCheckHost(ctx, target, headers) {
-    const chNodes = REMOTE_COUNTRIES.filter((c) => c.node).map((c) => c.node);
-    const form = "host=" + encodeURIComponent(target)
-        + chNodes.map((n, i) => `&nodes[${i}]=${encodeURIComponent(n)}`).join("");
-    const d = await fetchJSON(ctx, `${CHECK_HOST}/check-tcp`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/x-www-form-urlencoded" },
-        body: form,
-    });
-    if (d && d.ok && d.request_id) return d;
-    const legacy = await fetchJSON(ctx, `${CHECK_HOST}/check-tcp?host=${encodeURIComponent(target)}&max_nodes=10`, { headers });
-    return legacy && legacy.ok && legacy.request_id ? legacy : null;
-}
-
-// 远端探测：六国探针 TCP 探测 host:port，逐国给出延迟（原版流程 + [null] 守卫）
-async function checkRemote(ctx, host, port) {
-    const headers = { "Accept": "application/json", "User-Agent": UA };
-    const target = host + ":" + port;
-
-    // check-host 提交与 Globalping 韩国测量同时发起，并行等结果
-    const [d, krSubmit] = await Promise.all([
-        submitCheckHost(ctx, target, headers),
-        fetchJSON(ctx, GP_API, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "User-Agent": UA },
-            body: JSON.stringify({
-                type: "ping", target: host,
-                measurementOptions: { port: parseInt(port, 10), protocol: "TCP" },
-                locations: [{ country: "KR" }], limit: 2,
-            }),
-        }),
-    ]);
-    await sleep(6000);
-
-    // check-host 结果按国家归拢（原版读 nr[0].time 未防 [null] 会卡死，已加守卫）
-    const msByCc = {};
-    if (d) {
-        const res = await fetchJSON(ctx, `${CHECK_HOST}/check-result/${d.request_id}`, { headers });
-        if (res) {
-            const nodeList = d.nodes || {};
-            for (const n of Object.keys(nodeList)) {
-                const info = nodeList[n];
-                let cc = info && info.length >= 1 ? String(info[0]).toUpperCase() : "";
-                if (cc === "UK") cc = "GB";
-                if (!cc || msByCc[cc]) continue;
-                const nr = res[n];
-                if (nr && Array.isArray(nr) && nr.length > 0 && nr[0] && nr[0].time !== undefined) {
-                    msByCc[cc] = formatMs(nr[0].time * 1000);
-                }
-            }
-        }
-    }
-
-    // Globalping 韩国探针结果
-    if (krSubmit && krSubmit.id) {
-        const g = await fetchJSON(ctx, `${GP_API}/${krSubmit.id}`, { headers });
-        const r0 = g && g.results && g.results[0];
-        if (r0 && r0.result && r0.result.status === "finished" && r0.result.stats && r0.result.stats.rcv > 0) {
-            msByCc.KR = formatMs(r0.result.stats.avg || 0);
-        }
-    }
-
-    let reachable = false;
-    const items = REMOTE_COUNTRIES.map((c) => {
-        const ms = msByCc[c.cc];
-        if (ms) reachable = true;
-        return { flag: getFlag(c.cc), ms: ms || "--.--ms" };
-    });
-    return { ok: reachable, items, configured: true };
-}
-
-// 国内探测：Globalping 国内三网探针（原版请求体一致）
-async function fetchGlobalping(ctx, host, port) {
-    const body = {
-        type: "ping",
-        target: host,
-        measurementOptions: { port: parseInt(port, 10), protocol: "TCP" },
-        locations: [{ country: "CN", tags: ["eyeball-network"] }],
-        limit: 12,
-    };
-    const headers = { "Content-Type": "application/json", "User-Agent": UA };
-    const d = await fetchJSON(ctx, GP_API, { method: "POST", headers, body: JSON.stringify(body) });
-    if (!d || !d.id) return null;
-    await sleep(6000);
-    return fetchJSON(ctx, `${GP_API}/${d.id}`, { headers: { "Accept": "application/json", "User-Agent": UA } });
-}
-
-/* ---------- 汇总与结论（结论树与原版一致） ---------- */
-
-const STORE_KEY = "blockcheck_last_exit";
-
-// 读上次成功时的出口 IP（节点挂掉时远端探测就靠它兜底）
-function loadLastExit(ctx) {
+// 经节点向一个国家的端点发请求并计时：拿到响应 = 可达（值为延迟）；
+// 抛错/超时 = 中断（这个节点到达不了这个国家）
+async function probeCountry(ctx, policy, c) {
+    const options = { timeout: TIMEOUT, headers: { "User-Agent": UA }, redirect: "manual" };
+    if (policy) options.policy = policy;
+    const t0 = Date.now();
     try {
-        if (ctx.storage && typeof ctx.storage.getJSON === "function") {
-            const v = ctx.storage.getJSON(STORE_KEY);
-            if (v && v.ip) return v;
-        }
-    } catch { /* 存储不可用就当没有 */ }
-    return null;
-}
-
-function saveLastExit(ctx, ip, policy) {
-    try {
-        if (ctx.storage && typeof ctx.storage.setJSON === "function") {
-            ctx.storage.setJSON(STORE_KEY, { ip, policy: policy || "", ts: Date.now() });
-        }
-    } catch { /* 存储失败不影响检测 */ }
+        await ctx.http.get(c.url, options);
+        return { cc: c.cc, name: c.name, flag: getFlag(c.cc), ok: true, ms: formatMs(Date.now() - t0) };
+    } catch {
+        return { cc: c.cc, name: c.name, flag: getFlag(c.cc), ok: false, ms: "中断" };
+    }
 }
 
 async function detect(ctx, cfg) {
     const target = cfg.policy ? `策略「${cfg.policy}」` : "兜底策略";
 
-    const [via, direct] = await Promise.all([
+    // 三路并行：经节点查出口、直连查本机、经节点测六国
+    const [via, direct, items] = await Promise.all([
         checkVia(ctx, cfg.policy),
         checkDirect(ctx),
+        Promise.all(PROBE_COUNTRIES.map((c) => probeCountry(ctx, cfg.policy, c))),
     ]);
-    if (via.ok) saveLastExit(ctx, via.info.query, cfg.policy);
 
-    /* 远端探测目标，三级来源（智能化：能自动就不手动）：
-     * 1) 手动填的服务器地址+端口 —— 精确；
-     * 2) 自动：本次出口 IP（节点通时 ip-api 直接给出）+ 443 —— 大多数机场
-     *    节点（VLESS/TLS/Reality）服务器即出口机、端口 443，探测真实有效；
-     * 3) 自动兜底：上次成功缓存的出口 IP + 443 —— 节点这次挂了也能测。
-     * 自动模式带防误报：节点明明通、六国却全测不通，多半是中转入口或非 443
-     * 端口（自动目标不对），标「未命中」且不参与结论，不会误报成被墙。 */
-    let host = cfg.host, port = cfg.port, auto = false;
-    if (!host || !port) {
-        const exitIp = via.ok ? via.info.query : (loadLastExit(ctx) || {}).ip;
-        if (exitIp) {
-            host = host || exitIp;
-            port = port || "443";
-            auto = true;
-        }
-    }
+    const okCount = items.filter((i) => i.ok).length;
+    const remote = { items, okCount, allOk: okCount === items.length, anyOk: okCount > 0 };
+    const blockedNames = items.filter((i) => !i.ok).map((i) => i.name);
 
-    const probed = host && port ? await checkRemote(ctx, host, port) : null;
-    // 远端探测常驻：实在没有目标时给占位结果（六国旗帜 + --.--ms），面板上标
-    // 「未设置」，不再整段消失 —— 整段缺失会被误读成脚本把功能藏了
-    const remote = probed || {
-        ok: false, configured: false,
-        items: REMOTE_COUNTRIES.map((c) => ({ flag: getFlag(c.cc), ms: "--.--ms" })),
-    };
-    if (probed) {
-        remote.auto = auto;
-        remote.target = `${host}:${port}`;
-        remote.miss = Boolean(auto && via.ok && !remote.ok);
-    }
-
-    let gpData = null;
-    if (direct.ok && remote && remote.ok && !via.ok) {
-        gpData = await fetchGlobalping(ctx, host, port);
-    }
-    const analysis = gpData ? analyzeBlockSource(gpData) : null;
-
-    // 国内探针按 电信 → 联通 → 移动 排序摊平（与原版面板一致）
-    const domestic = [];
-    if (analysis) {
-        const abbr = { "中国电信": "电信", "中国联通": "联通", "中国移动": "移动" };
-        for (const key of ["中国电信", "中国联通", "中国移动"]) {
-            const group = analysis.ispGroups[key];
-            if (!group) continue;
-            for (const p of group.probes) domestic.push({ label: `${abbr[key]}·${p.city}`, ms: p.ms, ok: p.ok });
-        }
-    }
-
-    const nOk = via.ok, dOk = direct.ok, rKnown = remote.configured === true && !remote.miss, rOk = remote.ok;
     let conclusion, short;
-    if (!dOk) {
+    if (!direct.ok) {
         conclusion = "⚠️ 本机网络异常"; short = "异常";
-    } else if (nOk && (!rKnown || rOk)) {
-        conclusion = "✅ 节点正常"; short = "正常";
-    } else if (!nOk && !rKnown) {
+    } else if (!via.ok) {
         conclusion = "🚫 节点不可达"; short = "不可达";
-    } else if (!nOk && rOk && dOk) {
-        if (analysis && analysis.conclusion) {
-            conclusion = analysis.conclusion;
-            short = conclusion.startsWith("✅") ? "可达" : "阻断";
-        } else {
-            conclusion = "🚫 疑似被运营商/GFW 阻断"; short = "阻断";
-        }
-    } else if (!nOk && rKnown && !rOk && dOk) {
-        conclusion = "💤 节点离线"; short = "离线";
+    } else if (remote.allOk) {
+        conclusion = "✅ 节点正常"; short = "正常";
+    } else if (remote.anyOk) {
+        conclusion = `⚠️ 部分中断：${blockedNames.join("、")}不可达`; short = "部分中断";
     } else {
-        conclusion = "❓ 数据不完整"; short = "未知";
+        conclusion = "⚠️ 出站异常：六国均中断"; short = "异常";
     }
 
-    return { target, time: clock(), via, direct, remote, domestic, analysis, conclusion, short };
+    return { target, time: clock(), via, direct, remote, conclusion, short };
 }
 
-/* ---------- 面板文字（通知与日志共用，结构同原版） ---------- */
+/* ---------- 面板文字（通知与日志共用） ---------- */
 
 function pairsText(items, render) {
     const lines = [];
@@ -414,6 +166,13 @@ function pairsText(items, render) {
         lines.push(right ? `${left}    ${right}` : left);
     }
     return lines;
+}
+
+function remoteStatusText(m) {
+    const r = m.remote;
+    if (r.allOk) return "✅ 全部可达";
+    if (r.anyOk) return `⚠️ 部分中断（${r.okCount}/6 可达）`;
+    return "❌ 全部中断";
 }
 
 function panelLines(m) {
@@ -426,27 +185,8 @@ function panelLines(m) {
         lines.push(`ISP: ${d.isp || "未知"}`);
     }
     lines.push(`本机网络: ${m.direct.ok ? "✅ 正常" : "❌ 异常"}`);
-    if (m.remote) {
-        if (m.remote.configured === false) {
-            lines.push("远端探测: ⚠️ 未设置");
-            lines.push(...pairsText(m.remote.items, (it) => `${it.flag} ${it.ms}`));
-            lines.push("（节点出口未知：在模块里填服务器地址和端口后启用）");
-        } else {
-            lines.push(`远端探测: ${m.remote.miss ? "⚠️ 未命中" : (m.remote.ok ? "✅ 可达" : "❌ 不可达")}`);
-            if (m.remote.items && m.remote.items.length > 0) {
-                lines.push(...pairsText(m.remote.items, (it) => `${it.flag} ${it.ms}`));
-            } else if (m.remote.error) {
-                lines.push(m.remote.error);
-            }
-            if (m.remote.auto) {
-                lines.push(`（自动探测 ${m.remote.target}：出口 IP + 443${m.remote.miss ? "；未命中多半是中转入口或非 443 端口，填地址可精确测" : ""}）`);
-            }
-        }
-    }
-    if (m.analysis && m.domestic.length > 0) {
-        lines.push(`国内探测: ${m.domestic.some((p) => p.ok) ? "✅ 可达" : "❌ 不可达"}`);
-        lines.push(...pairsText(m.domestic, (p) => `${p.label} ${p.ms} ${p.ok ? "✓" : "✗"}`));
-    }
+    lines.push(`远端探测: ${remoteStatusText(m)}`);
+    lines.push(...pairsText(m.remote.items, (it) => `${it.flag} ${it.ms}`));
     lines.push("📋 诊断结论");
     lines.push(m.conclusion);
     lines.push(`节点: ${m.target}`);
@@ -533,30 +273,24 @@ function nodeRow(m, size, withTime = false) {
     ], { gap: 0 });
 }
 
-// 远端探测状态词：未填地址时是「未设置」，与真不通区分开
+// 远端探测状态词（组件用短版）
 function remoteStatus(m) {
     if (!m.remote) return null;
-    if (m.remote.configured === false) return "⚠️ 未设置";
-    if (m.remote.miss) return "⚠️ 未命中";
-    return m.remote.ok ? "✅ 可达" : "❌ 不可达";
+    const r = m.remote;
+    if (r.allOk) return "✅ 全部可达";
+    if (r.anyOk) return `⚠️ ${r.okCount}/6 可达`;
+    return "❌ 全部中断";
 }
 
-// 探测网格：每格一个 flex 文本，行高写明（flex 行纪律）；colored 时延迟按通断着色
-function gridRows(items, size, cols, colored) {
+// 探测网格：每格一个 flex 文本，行高写明（flex 行纪律）；中断的格子标红
+function gridRows(items, size, cols) {
     const rows = [];
     for (let i = 0; i < items.length; i += cols) {
         const cells = [];
         for (let j = 0; j < cols; j++) {
             const it = items[i + j];
             if (!it) { cells.push({ ...spacer(), flex: 1 }); continue; }
-            if (colored) {
-                cells.push({
-                    type: "stack", direction: "row", alignItems: "center", flex: 1, height: LH(size),
-                    children: [T(it.label, size, C.soft, "regular"), T(` ${it.ms}`, size, it.ok ? C.good : C.bad, "semibold")],
-                });
-            } else {
-                cells.push({ ...T(`${it.flag} ${it.ms}`, size, C.soft, "regular", { minScale: 0.7 }), flex: 1 });
-            }
+            cells.push({ ...T(`${it.flag} ${it.ms}`, size, it.ok ? C.soft : C.bad, it.ok ? "regular" : "semibold", { minScale: 0.7 }), flex: 1 });
         }
         rows.push(row(cells, { gap: 6, height: LH(size) }));
     }
@@ -573,30 +307,15 @@ function card(children) {
     });
 }
 
-// 远端探测卡片：标题行 + 六国网格（+ 未设置时的启用提示）
+// 远端探测卡片：标题行 + 六国网格（大号带一行口径说明）
 function probeCard(m, size, cols, withHint) {
     if (!m.remote) return null;
     const els = [sectionRow("远端探测", remoteStatus(m), size + 1)];
-    if (m.remote.items && m.remote.items.length > 0) {
-        els.push(...gridRows(m.remote.items, size, cols, false));
-    } else if (m.remote.error) {
-        els.push(T(m.remote.error, size, C.faint, "regular"));
-    }
-    if (withHint && m.remote.configured === false) {
-        els.push(T("节点出口未知：在模块里填服务器地址和端口后启用", size - 1, C.faint, "regular", { minScale: 0.7 }));
-    } else if (withHint && m.remote.auto) {
-        els.push(T(`自动探测 ${m.remote.target}（出口IP+443）${m.remote.miss ? "：未命中多半是中转或非 443 端口" : ""}`, size - 1, C.faint, "regular", { minScale: 0.7 }));
+    els.push(...gridRows(m.remote.items, size, cols));
+    if (withHint) {
+        els.push(T("经节点出站实测：请求各国端点的往返延迟，中断 = 节点到达不了该国", size - 1, C.faint, "regular", { minScale: 0.7 }));
     }
     return card(els);
-}
-
-// 国内探测卡片：标题行 + 三网网格（延迟着色）
-function domesticCard(m, size, cells) {
-    if (!m.analysis || !m.domestic.length) return null;
-    return card([
-        sectionRow("国内探测", m.domestic.some((p) => p.ok) ? "✅ 可达" : "❌ 不可达", size + 1),
-        ...gridRows(cells.map((p) => ({ label: p.label, ms: p.ms, ok: p.ok })), size, 2, true),
-    ]);
 }
 
 function viaDetails(m, size) {
@@ -609,31 +328,15 @@ function viaDetails(m, size) {
     ];
 }
 
-/* 大号 / 超大号：完整面板（段落、顺序、用词同原版）。
- * 国内网格：大号每家运营商一个代表探针，超大号放宽到 6 格；全量在通知面板里。 */
-function largeWidget(m, xl = false) {
+/* 大号 / 超大号：完整面板 */
+function largeWidget(m) {
     const sec = 15, det = 12.5, concl = 17;
-    let domesticCells = [];
-    if (m.analysis && m.domestic.length > 0) {
-        if (xl) {
-            domesticCells = m.domestic.slice(0, 6);
-        } else {
-            const seen = new Set();
-            domesticCells = m.domestic.filter((p) => {
-                const isp = p.label.split("·")[0];
-                if (seen.has(isp)) return false;
-                seen.add(isp);
-                return true;
-            });
-        }
-    }
     return root([
         titleRow(m, 14),
         sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", sec),
         ...viaDetails(m, det),
         sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec),
         probeCard(m, det, 2, true),
-        domesticCard(m, det, domesticCells),
         T("📋 诊断结论", sec, C.ink, "bold"),
         T(m.conclusion, concl, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
         spacer(),
@@ -713,8 +416,8 @@ function widgetFor(family, m) {
         case "accessoryCircular": return circularWidget(m);
         case "accessoryRectangular": return rectangularWidget(m);
         case "systemSmall": return smallWidget(m);
-        case "systemLarge": return largeWidget(m, false);
-        case "systemExtraLarge": return largeWidget(m, true);
+        case "systemLarge": return largeWidget(m);
+        case "systemExtraLarge": return largeWidget(m);
         default: return mediumWidget(m);
     }
 }
@@ -722,7 +425,7 @@ function widgetFor(family, m) {
 function errorWidget(family, message) {
     const m = {
         target: "兜底策略", time: clock(),
-        via: { ok: false }, direct: { ok: false }, remote: null, domestic: [], analysis: null,
+        via: { ok: false }, direct: { ok: false }, remote: null,
         conclusion: "🛑 检测出错：" + String(message || "").slice(0, 40), short: "出错",
     };
     return widgetFor(family, m);
@@ -735,8 +438,6 @@ export default async function (ctx) {
     const env = ctx.env || {};
     const cfg = {
         policy: String(env.POLICY || "").trim(),
-        host: String(env.HOST || "").trim(),
-        port: String(env.PORT || "").trim(),
     };
     const family = ctx.widgetFamily || "";
 

@@ -7,19 +7,13 @@ env_schema:
   POLICY:
     name: "检测策略"
     description: "检测哪个策略组或节点的连通性（如 Proxy、香港）；留空按 Egern 分流规则（兜底策略）"
-  HOST:
-    name: "服务器地址（可选）"
-    description: "一般不用填：脚本自动用节点的出口 IP + 443 探测；节点是中转入口或非 443 端口时，在这里填真实服务器域名或 IP 可精确测"
-  PORT:
-    name: "服务器端口（可选）"
-    description: "一般不用填（自动按 443 测）；节点端口不是 443 时填真实端口"
 
 scriptings:
   - generic:
       name: "block-check"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check_egern.js?v=55"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check_egern.js?v=60"
       update_interval: 300
-      timeout: 60
+      timeout: 30
 
 widgets:
   - name: "节点阻断检测"
