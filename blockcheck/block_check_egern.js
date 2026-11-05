@@ -1,6 +1,6 @@
 /*
  * ============================================================
- * 节点阻断检测（Egern 版 v5，功能与原版对齐 + 可视化小组件）
+ * 节点阻断检测（Egern 版 v5.2，功能与原版对齐 + 可视化小组件）
  * ============================================================
  * 原作者：RavelloH（https://github.com/RavelloH）
  * 原版：Quantumult X event-interaction 脚本 block_check.js（同目录存档）
@@ -389,6 +389,17 @@ function panelLines(m) {
 }
 
 /* ---------- 小组件 DSL ---------- */
+/*
+ * 排版纪律（对照真机能正常渲染的参考脚本总结，逐条照做）：
+ * - 带 flex 的元素横竖都会撑满，装着它的行会被纵向拉高 → 凡含 flex 的行必须写明 height；
+ * - 行高按字号算：LH(size) = ceil(size × 1.4)，写进每个行/文本行的 height，不靠渲染器猜；
+ * - 固定长度 spacer 在交叉轴会撑满（行里的 spacer(10) 会把行纵向撑高）→ 行内间距一律用
+ *   gap 或 padding，不用定长 spacer；spacer() 只用在行内推右对齐和列尾吸收余量（紧张时压成 0）；
+ * - 根容器 gap: 0，纵向节奏全靠各行写明的 height；
+ * - 内容按尺寸分级预算：中号可用高约 135pt 装不下完整面板，必须精简（见 mediumWidget）。
+ */
+
+const LH = (size) => Math.ceil(size * 1.4);
 
 function T(text, size, color, weight = "regular", extra = {}) {
     const el = { type: "text", text: String(text), font: { size, weight }, maxLines: 1 };
@@ -398,6 +409,11 @@ function T(text, size, color, weight = "regular", extra = {}) {
 
 function row(children, extra = {}) {
     return { type: "stack", direction: "row", alignItems: "center", children: children.filter(Boolean), ...extra };
+}
+
+// 带明确行高的行（行高由主字号决定）
+function hrow(children, size, extra = {}) {
+    return row(children, { height: LH(size), ...extra });
 }
 
 function spacer(length) {
@@ -419,122 +435,159 @@ function root(children, padding) {
     };
 }
 
-function sectionRow(label, status, size) {
-    return row([T(label, size, C.ink, "bold"), spacer(6), T(status, size, C.ink, "semibold")]);
-}
-
-function detailRow(label, value, size) {
-    return row([
-        spacer(10),
-        T(label, size, C.soft, "bold"),
-        T(`: ${value}`, size, C.soft, "regular", { minScale: 0.6 }),
-    ]);
-}
-
 function titleRow(m, size) {
-    return row([
+    return hrow([
         T("🌐 节点阻断检测", size, C.soft, "semibold"),
         spacer(),
         T(m.time, size - 2, C.faint, "medium"),
-    ], { gap: 5 });
+    ], size, { gap: 5 });
 }
 
-function nodeRow(m, size) {
-    return row([
+// 段标题行：加粗标签 + 状态，如「节点代理 ✅ 正常」
+function sectionRow(label, status, size) {
+    return hrow([
+        T(label, size, C.ink, "bold"),
+        T(status, size, C.ink, "semibold"),
+    ], size, { gap: 6 });
+}
+
+// 明细行：「标签: 值」，缩进用 padding（不用定长 spacer，会撑高行）
+function detailRow(label, value, size) {
+    return hrow([
+        T(label, size, C.soft, "bold"),
+        T(`: ${value}`, size, C.soft, "regular", { minScale: 0.6 }),
+    ], size, { padding: [0, 0, 0, 10] });
+}
+
+function nodeRow(m, size, withTime = false) {
+    return hrow([
         T("节点", size, C.soft, "bold"),
         T(`: ${m.target}`, size, C.link, "regular", { minScale: 0.7 }),
-    ]);
+        withTime ? spacer() : null,
+        withTime ? T(m.time, size - 1, C.faint, "medium") : null,
+    ], size, { gap: 0 });
 }
 
-// 两列网格（远端/国内探测）：每格「旗帜/标签 + 延迟」，国内探测的延迟按通断着色
-function gridRows(items, size, colored) {
+// 探测网格：每格一个 flex 文本（行高写明）；cols 列。colored 时延迟按通断着色
+function gridRows(items, size, cols, colored) {
     const rows = [];
-    for (let i = 0; i < items.length; i += 2) {
-        const cell = (it) => colored
-            ? row([T(it.label, size, C.soft, "regular"), spacer(4), T(it.ms, size, it.ok ? C.good : C.bad, "semibold")], { flex: 1 })
-            : { ...T(`${it.flag} ${it.ms}`, size, C.soft, "regular"), flex: 1 };
-        const left = cell(items[i]);
-        const right = i + 1 < items.length ? cell(items[i + 1]) : { ...spacer(), flex: 1 };
-        rows.push(row([left, right], { gap: 8 }));
+    for (let i = 0; i < items.length; i += cols) {
+        const cells = [];
+        for (let j = 0; j < cols; j++) {
+            const it = items[i + j];
+            if (!it) { cells.push({ ...spacer(), flex: 1 }); continue; }
+            if (colored) {
+                cells.push({
+                    type: "stack", direction: "row", alignItems: "center", flex: 1, height: LH(size),
+                    children: [T(it.label, size, C.soft, "regular"), T(` ${it.ms}`, size, it.ok ? C.good : C.bad, "semibold")],
+                });
+            } else {
+                cells.push({ ...T(`${it.flag} ${it.ms}`, size, C.soft, "regular", { minScale: 0.7 }), flex: 1 });
+            }
+        }
+        rows.push(hrow(cells, size, { gap: 6 }));
     }
     return rows;
 }
 
-function withGaps(elements, gap) {
-    const out = [];
-    elements.forEach((el, i) => { if (i > 0) out.push(spacer(gap)); out.push(el); });
-    return out;
+function viaDetails(m, size) {
+    if (!m.via.ok) return [];
+    const d = m.via.info;
+    return [
+        detailRow("IP", d.query, size),
+        detailRow("位置", [d.country, d.regionName, d.city].filter(Boolean).join(" - "), size),
+        detailRow("ISP", d.isp || "未知", size),
+    ];
 }
 
-// 面板段落（中/大号共用，size 控制字号档位）
-function panelSections(m, size, detailSize) {
-    const els = [];
-    els.push(sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", size));
-    if (m.via.ok) {
-        const d = m.via.info;
-        els.push(detailRow("IP", d.query, detailSize));
-        els.push(detailRow("位置", [d.country, d.regionName, d.city].filter(Boolean).join(" - "), detailSize));
-        els.push(detailRow("ISP", d.isp || "未知", detailSize));
-    }
-    els.push(sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", size));
+/* 大号 / 超大号：完整面板（段落、顺序、用词同原版）。
+ * 高度预算（大号可用约 320pt）：最重场景 = 节点不通（无出口明细）+ 远端 3 行网格
+ * + 国内每家一行代表探针 + 两行结论，约 320pt 内；超大号国内网格放宽到 6 格。 */
+function largeWidget(m, xl = false) {
+    const sec = 15, det = 12.5, concl = 17;
+    const els = [titleRow(m, 14)];
+    els.push(sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", sec));
+    els.push(...viaDetails(m, det));
+    els.push(sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec));
     if (m.remote) {
-        els.push(sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", size));
+        els.push(sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", sec));
         if (m.remote.items && m.remote.items.length > 0) {
-            els.push(...gridRows(m.remote.items, detailSize, false));
+            els.push(...gridRows(m.remote.items, det, 2, false));
         } else if (m.remote.error) {
-            els.push(T(m.remote.error, detailSize, C.faint, "regular"));
+            els.push(hrow([T(m.remote.error, det, C.faint, "regular")], det));
         }
     }
     if (m.analysis && m.domestic.length > 0) {
-        els.push(sectionRow("国内探测", m.domestic.some((p) => p.ok) ? "✅ 可达" : "❌ 不可达", size));
-        els.push(...gridRows(m.domestic.map((p) => ({ label: p.label, ms: p.ms, ok: p.ok })), detailSize, true));
+        els.push(sectionRow("国内探测", m.domestic.some((p) => p.ok) ? "✅ 可达" : "❌ 不可达", sec));
+        // 每家运营商取第一个探针（大号 3 格 2 行；超大号 6 格 3 行），全量在通知面板里
+        const seen = new Set();
+        const reps = m.domestic.filter((p) => {
+            const isp = p.label.split("·")[0];
+            if (seen.has(isp)) return false;
+            seen.add(isp);
+            return true;
+        });
+        const cells = xl ? m.domestic.slice(0, 6) : reps;
+        els.push(...gridRows(cells.map((p) => ({ label: p.label, ms: p.ms, ok: p.ok })), det, 2, true));
     }
-    els.push(T("📋 诊断结论", size, C.ink, "bold"));
-    els.push(T(m.conclusion, size + 3, C.ink, "bold", { maxLines: 2, minScale: 0.65 }));
-    return els;
+    els.push(hrow([T("📋 诊断结论", sec, C.ink, "bold")], sec));
+    els.push({
+        ...T(m.conclusion, concl, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
+        height: LH(concl) * (m.conclusion.length > 14 ? 2 : 1),
+    });
+    els.push(spacer());
+    els.push(nodeRow(m, 12.5));
+    return root(els, [12, 14, 12, 14]);
 }
 
-// 注意：根节点不要加 flex 撑满的 spacer 把末行顶到底边——内容略高时
-// 最后一行会被卡片边缘截断（v5 真机截图「节点：兜底策略」被切一半）。
-// 末行紧跟内容自然排布，并收紧行距给内容留余量。
+/* 中号：可用高约 135pt，装不下完整面板 —— 精简版面板：
+ * 无单独标题行（时间并到节点行右侧）；节点代理行右侧带出口 IP；
+ * 有远端时六国旗帜 3 列 × 2 行；国内探测在中号只体现在结论里（放不下单独一行）；
+ * 无远端时补位置/ISP 明细行（正好填满）。 */
 function mediumWidget(m) {
-    return root([
-        titleRow(m, 13),
-        spacer(7),
-        ...withGaps(panelSections(m, 14, 12), 4),
-        spacer(6),
-        nodeRow(m, 12),
-    ], 12);
-}
-
-function largeWidget(m) {
-    return root([
-        titleRow(m, 15),
-        spacer(9),
-        ...withGaps(panelSections(m, 16, 13), 5),
-        spacer(7),
-        nodeRow(m, 13),
-    ], 14);
+    const sec = 12, det = 11, concl = 13.5;
+    const els = [];
+    // 节点代理（通时右侧带出口 IP）
+    els.push(hrow([
+        T("节点代理", sec, C.ink, "bold"),
+        T(m.via.ok ? "✅ 正常" : "❌ 不可达", sec, C.ink, "semibold"),
+        spacer(),
+        m.via.ok ? T(m.via.info.query, det, C.soft, "medium", { minScale: 0.6 }) : null,
+    ], sec, { gap: 6 }));
+    els.push(sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec));
+    if (m.remote) {
+        els.push(sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", sec));
+        if (m.remote.items && m.remote.items.length > 0) {
+            els.push(...gridRows(m.remote.items, 10.5, 3, false));
+        }
+    } else if (m.via.ok) {
+        const d = m.via.info;
+        els.push(detailRow("位置", [d.country, d.regionName, d.city].filter(Boolean).join(" - "), det));
+        els.push(detailRow("ISP", d.isp || "未知", det));
+    }
+    els.push({
+        ...T(m.conclusion, concl, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
+        height: LH(concl) * (m.conclusion.length > 15 ? 2 : 1),
+    });
+    els.push(nodeRow(m, det, true));
+    return root(els, [9, 12, 9, 12]);
 }
 
 function smallWidget(m) {
     const els = [
         titleRow(m, 11),
-        spacer(8),
+        { ...T(m.conclusion, 15, C.ink, "bold", { maxLines: 2, minScale: 0.65 }), height: LH(15) * (m.conclusion.length > 12 ? 2 : 1) },
         sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", 12),
-        spacer(4),
-        sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", 12),
     ];
-    if (m.remote) {
-        els.push(spacer(4), sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", 12));
+    if (m.via.ok) {
+        els.push(hrow([T(`${getFlag(m.via.info.countryCode)} ${m.via.info.query}`, 12, C.soft, "regular", { minScale: 0.6 })], 12));
     }
-    els.push(
-        spacer(8),
-        T(m.conclusion, 14, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
-        spacer(),
-        nodeRow(m, 11),
-    );
-    return root(els, 12);
+    if (m.remote) {
+        els.push(sectionRow("远端探测", m.remote.ok ? "✅ 可达" : "❌ 不可达", 12));
+    }
+    els.push(spacer());
+    els.push(nodeRow(m, 11));
+    return root(els, [10, 12, 10, 12]);
 }
 
 function inlineWidget(m) {
@@ -578,8 +631,8 @@ function widgetFor(family, m) {
         case "accessoryCircular": return circularWidget(m);
         case "accessoryRectangular": return rectangularWidget(m);
         case "systemSmall": return smallWidget(m);
-        case "systemLarge":
-        case "systemExtraLarge": return largeWidget(m);
+        case "systemLarge": return largeWidget(m, false);
+        case "systemExtraLarge": return largeWidget(m, true);
         default: return mediumWidget(m);
     }
 }
@@ -592,6 +645,7 @@ function errorWidget(family, message) {
     };
     return widgetFor(family, m);
 }
+
 
 /* ---------- 主入口 ---------- */
 
