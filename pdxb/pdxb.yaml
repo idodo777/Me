@@ -1,0 +1,19 @@
+name: "浦大喜奔开屏广告拦截"
+description: "拦截浦大喜奔（浦发银行信用卡 App）开屏广告：仅当 image/images.spdbccc.com.cn 返回的图片（JPEG/PNG/GIF）实际分辨率为 1320x2868（iPhone 18 Pro Max）时终止响应，其他尺寸与格式一律放行，异常时自动放行。"
+author: "idodo777"
+homepage: "https://github.com/idodo777/Me"
+
+scriptings:
+  - http_response:
+      name: "浦大喜奔开屏尺寸拦截"
+      match: "^https?://images?\\.spdbccc\\.com\\.cn/.+"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/pdxb/pdxb.js"
+      body_required: true
+      binary_body: true
+      max_size: 33554432
+      timeout: 20
+
+mitm:
+  hostnames:
+    - "image.spdbccc.com.cn"
+    - "images.spdbccc.com.cn"
