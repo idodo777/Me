@@ -1,25 +1,14 @@
-rules:
-  - domain_suffix:
-      match: "eplayerx.com"
-      policy: "DIRECT"
-
-  - domain_suffix:
-      match: "mobaiemby.site"
-      policy: "DIRECT"
-
-  - domain_suffix:
-      match: "reflix.top"
-      policy: "DIRECT"
-
-  - ip_cidr:
-      match: "45.143.131.228/32"
-      policy: "DIRECT"
-      name: "墨云阁"
-
-  - and:
-      match:
-        - ip_cidr:
-            match: "110.42.42.172/32"
-        - dest_port:
-            match: "36890"
-      policy: "DIRECT"
+# NAME: Direct
+# 直连规则合集：在主配置里以 rule_set 引用并绑定 policy: DIRECT
+no_resolve: true
+domain_suffix_set:
+  - eplayerx.com
+  - mobaiemby.site
+  - reflix.top
+ip_cidr_set:
+  - 45.143.131.228/32
+and_set:
+  - - !ip_cidr
+      match: 110.42.42.172/32
+    - !dest_port
+      match: "36890"
