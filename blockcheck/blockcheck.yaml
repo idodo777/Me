@@ -9,15 +9,15 @@ env_schema:
     description: "检测哪个策略组或节点的连通性（如 Proxy、香港）；留空按 Egern 分流规则（兜底策略）"
   HOST:
     name: "服务器地址（可选）"
-    description: "上面那个节点的服务器域名或 IP；填了才启用远端探测（看哪些国家线路不通）和国内探测（定位阻断来源）"
+    description: "一般不用填：脚本自动用节点的出口 IP + 443 探测；节点是中转入口或非 443 端口时，在这里填真实服务器域名或 IP 可精确测"
   PORT:
     name: "服务器端口（可选）"
-    description: "上面那个节点的端口号，例如 443"
+    description: "一般不用填（自动按 443 测）；节点端口不是 443 时填真实端口"
 
 scriptings:
   - generic:
       name: "block-check"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check_egern.js?v=53"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check_egern.js?v=55"
       update_interval: 300
       timeout: 60
 

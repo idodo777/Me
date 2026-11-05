@@ -1,6 +1,6 @@
 /*
  * ============================================================
- * 节点阻断检测（Egern 版 v5.3，功能与原版对齐 + 可视化小组件）
+ * 节点阻断检测（Egern 版 v5.5，功能与原版对齐 + 可视化小组件）
  * ============================================================
  * 原作者：RavelloH（https://github.com/RavelloH）
  * 原版：Quantumult X event-interaction 脚本 block_check.js（同目录存档）
@@ -21,10 +21,13 @@
  * 本机网络异常 / 数据不完整（+ 国内探测的三种细分结论）。
  *
  * 与原版的差异（平台机制所限，已尽量等价）：
- * - 原版靠「长按节点」自动拿到服务器地址；Egern 没有这个接口。
- *   检测分两档：什么都不填 —— 只测节点代理与本机网络（经兜底
- *   策略，即 default 规则选中的出口）；在模块里再填上该节点的
- *   服务器地址与端口 —— 远端探测、国内探测自动启用，功能完整。
+ * - 原版靠「长按节点」自动拿到服务器地址；Egern 没有读节点配置的
+ *   接口（API 已逐项核对）。本版用三级来源自动凑目标：手动填的
+ *   地址优先；没填时用本次出口 IP + 443 自动探测（机场节点多为
+ *   服务器即出口、端口 443）；节点挂了则用上次成功缓存的出口 IP。
+ *   自动模式防误报：节点通而六国全不通 = 自动目标不对（中转入口
+ *   或非 443 端口），标「未命中」且不参与结论，不误报被墙。
+ *   只有「出口从未成功过又没填地址」时远端探测才显示未设置。
  * - 原版结果是 QuanX 的 HTML 面板；本版呈现为同结构文字面板
  *   （通知）与 Egern 小组件，段落、顺序、用词都按原版面板。
  * - 移植时修掉原版一个 bug：check-host 对探测失败的节点返回
@@ -47,6 +50,7 @@ const C = {
     soft: { light: "#59636E", dark: "#8B949E" },
     faint: { light: "#818B98", dark: "#6E7681" },
     link: { light: "#467fcf", dark: "#6ea8fe" },
+    card: { light: "#F2F5F9", dark: "#1D2530" },
     good: { light: "#1F9D55", dark: "#48C78E" },
     bad: { light: "#D73A49", dark: "#FE6685" },
 };
@@ -299,25 +303,69 @@ async function fetchGlobalping(ctx, host, port) {
 
 /* ---------- 汇总与结论（结论树与原版一致） ---------- */
 
+const STORE_KEY = "blockcheck_last_exit";
+
+// 读上次成功时的出口 IP（节点挂掉时远端探测就靠它兜底）
+function loadLastExit(ctx) {
+    try {
+        if (ctx.storage && typeof ctx.storage.getJSON === "function") {
+            const v = ctx.storage.getJSON(STORE_KEY);
+            if (v && v.ip) return v;
+        }
+    } catch { /* 存储不可用就当没有 */ }
+    return null;
+}
+
+function saveLastExit(ctx, ip, policy) {
+    try {
+        if (ctx.storage && typeof ctx.storage.setJSON === "function") {
+            ctx.storage.setJSON(STORE_KEY, { ip, policy: policy || "", ts: Date.now() });
+        }
+    } catch { /* 存储失败不影响检测 */ }
+}
+
 async function detect(ctx, cfg) {
     const target = cfg.policy ? `策略「${cfg.policy}」` : "兜底策略";
-    const hasAddr = Boolean(cfg.host && cfg.port);
 
-    const [via, direct, probed] = await Promise.all([
+    const [via, direct] = await Promise.all([
         checkVia(ctx, cfg.policy),
         checkDirect(ctx),
-        hasAddr ? checkRemote(ctx, cfg.host, cfg.port) : Promise.resolve(null),
     ]);
-    // 远端探测常驻：没填地址时给占位结果（六国旗帜 + --.--ms），面板上标「未设置」，
-    // 不再整段消失 —— 整段缺失会被误读成脚本把功能藏了
+    if (via.ok) saveLastExit(ctx, via.info.query, cfg.policy);
+
+    /* 远端探测目标，三级来源（智能化：能自动就不手动）：
+     * 1) 手动填的服务器地址+端口 —— 精确；
+     * 2) 自动：本次出口 IP（节点通时 ip-api 直接给出）+ 443 —— 大多数机场
+     *    节点（VLESS/TLS/Reality）服务器即出口机、端口 443，探测真实有效；
+     * 3) 自动兜底：上次成功缓存的出口 IP + 443 —— 节点这次挂了也能测。
+     * 自动模式带防误报：节点明明通、六国却全测不通，多半是中转入口或非 443
+     * 端口（自动目标不对），标「未命中」且不参与结论，不会误报成被墙。 */
+    let host = cfg.host, port = cfg.port, auto = false;
+    if (!host || !port) {
+        const exitIp = via.ok ? via.info.query : (loadLastExit(ctx) || {}).ip;
+        if (exitIp) {
+            host = host || exitIp;
+            port = port || "443";
+            auto = true;
+        }
+    }
+
+    const probed = host && port ? await checkRemote(ctx, host, port) : null;
+    // 远端探测常驻：实在没有目标时给占位结果（六国旗帜 + --.--ms），面板上标
+    // 「未设置」，不再整段消失 —— 整段缺失会被误读成脚本把功能藏了
     const remote = probed || {
         ok: false, configured: false,
         items: REMOTE_COUNTRIES.map((c) => ({ flag: getFlag(c.cc), ms: "--.--ms" })),
     };
+    if (probed) {
+        remote.auto = auto;
+        remote.target = `${host}:${port}`;
+        remote.miss = Boolean(auto && via.ok && !remote.ok);
+    }
 
     let gpData = null;
     if (direct.ok && remote && remote.ok && !via.ok) {
-        gpData = await fetchGlobalping(ctx, cfg.host, cfg.port);
+        gpData = await fetchGlobalping(ctx, host, port);
     }
     const analysis = gpData ? analyzeBlockSource(gpData) : null;
 
@@ -332,7 +380,7 @@ async function detect(ctx, cfg) {
         }
     }
 
-    const nOk = via.ok, dOk = direct.ok, rKnown = remote.configured === true, rOk = remote.ok;
+    const nOk = via.ok, dOk = direct.ok, rKnown = remote.configured === true && !remote.miss, rOk = remote.ok;
     let conclusion, short;
     if (!dOk) {
         conclusion = "⚠️ 本机网络异常"; short = "异常";
@@ -382,13 +430,16 @@ function panelLines(m) {
         if (m.remote.configured === false) {
             lines.push("远端探测: ⚠️ 未设置");
             lines.push(...pairsText(m.remote.items, (it) => `${it.flag} ${it.ms}`));
-            lines.push("（在模块里填该节点的服务器地址和端口后自动启用）");
+            lines.push("（节点出口未知：在模块里填服务器地址和端口后启用）");
         } else {
-            lines.push(`远端探测: ${m.remote.ok ? "✅ 可达" : "❌ 不可达"}`);
+            lines.push(`远端探测: ${m.remote.miss ? "⚠️ 未命中" : (m.remote.ok ? "✅ 可达" : "❌ 不可达")}`);
             if (m.remote.items && m.remote.items.length > 0) {
                 lines.push(...pairsText(m.remote.items, (it) => `${it.flag} ${it.ms}`));
             } else if (m.remote.error) {
                 lines.push(m.remote.error);
+            }
+            if (m.remote.auto) {
+                lines.push(`（自动探测 ${m.remote.target}：出口 IP + 443${m.remote.miss ? "；未命中多半是中转入口或非 443 端口，填地址可精确测" : ""}）`);
             }
         }
     }
@@ -404,13 +455,13 @@ function panelLines(m) {
 
 /* ---------- 小组件 DSL ---------- */
 /*
- * 排版纪律（对照真机能正常渲染的参考脚本总结，逐条照做）：
- * - 带 flex 的元素横竖都会撑满，装着它的行会被纵向拉高 → 凡含 flex 的行必须写明 height；
- * - 行高按字号算：LH(size) = ceil(size × 1.4)，写进每个行/文本行的 height，不靠渲染器猜；
- * - 固定长度 spacer 在交叉轴会撑满（行里的 spacer(10) 会把行纵向撑高）→ 行内间距一律用
- *   gap 或 padding，不用定长 spacer；spacer() 只用在行内推右对齐和列尾吸收余量（紧张时压成 0）；
- * - 根容器 gap: 0，纵向节奏全靠各行写明的 height；
- * - 内容按尺寸分级预算：中号可用高约 135pt 装不下完整面板，必须精简（见 mediumWidget）。
+ * 排版方法（综合两个真机验证过的参照：vfelix7 IP 纯净度 + moyuzaime 中国广电）：
+ * - 组合用「粗粒度积木」：页头行 + 若干内容块 + 结论 + 页脚行，根容器用 gap 统一节奏；
+ * - 文本行不写 height，靠内容自然撑高（广电写法）；只有含 flex 子元素的行/卡片
+ *   才写明 height（纯净度脚本的真机教训：flex 元素横竖都会撑满，会把所在行拉高）；
+ * - 行内间距用 gap / padding，不用定长 spacer（它在交叉轴会撑满）；spacer() 只用于
+ *   行内推右对齐，以及大号列尾吸收余量（紧张时压成 0，不会顶出卡片）；
+ * - 探测网格装进浅底圆角卡片（广电的数据卡片式），成块呈现而不是散行。
  */
 
 const LH = (size) => Math.ceil(size * 1.4);
@@ -425,9 +476,8 @@ function row(children, extra = {}) {
     return { type: "stack", direction: "row", alignItems: "center", children: children.filter(Boolean), ...extra };
 }
 
-// 带明确行高的行（行高由主字号决定）
-function hrow(children, size, extra = {}) {
-    return row(children, { height: LH(size), ...extra });
+function col(children, extra = {}) {
+    return { type: "stack", direction: "column", children: children.filter(Boolean), ...extra };
 }
 
 function spacer(length) {
@@ -438,51 +488,60 @@ function refreshAt() {
     return new Date(Date.now() + REFRESH_MINUTES * 60000).toISOString();
 }
 
-function root(children, padding) {
+function root(children, padding, gap) {
     return {
         type: "widget",
         backgroundColor: C.bg,
         padding,
-        gap: 0,
+        gap,
         refreshAfter: refreshAt(),
         children: children.filter(Boolean),
     };
 }
 
+// 页头：标题 + 右侧时间（广电页头式）
 function titleRow(m, size) {
-    return hrow([
+    return row([
         T("🌐 节点阻断检测", size, C.soft, "semibold"),
         spacer(),
         T(m.time, size - 2, C.faint, "medium"),
-    ], size, { gap: 5 });
+    ], { gap: 5 });
 }
 
 // 段标题行：加粗标签 + 状态，如「节点代理 ✅ 正常」
 function sectionRow(label, status, size) {
-    return hrow([
+    return row([
         T(label, size, C.ink, "bold"),
         T(status, size, C.ink, "semibold"),
-    ], size, { gap: 6 });
+    ], { gap: 6 });
 }
 
-// 明细行：「标签: 值」，缩进用 padding（不用定长 spacer，会撑高行）
+// 明细行：「标签: 值」，缩进用 padding
 function detailRow(label, value, size) {
-    return hrow([
+    return row([
         T(label, size, C.soft, "bold"),
         T(`: ${value}`, size, C.soft, "regular", { minScale: 0.6 }),
-    ], size, { padding: [0, 0, 0, 10] });
+    ], { padding: [0, 0, 0, 10] });
 }
 
 function nodeRow(m, size, withTime = false) {
-    return hrow([
+    return row([
         T("节点", size, C.soft, "bold"),
         T(`: ${m.target}`, size, C.link, "regular", { minScale: 0.7 }),
         withTime ? spacer() : null,
         withTime ? T(m.time, size - 1, C.faint, "medium") : null,
-    ], size, { gap: 0 });
+    ], { gap: 0 });
 }
 
-// 探测网格：每格一个 flex 文本（行高写明）；cols 列。colored 时延迟按通断着色
+// 远端探测状态词：未填地址时是「未设置」，与真不通区分开
+function remoteStatus(m) {
+    if (!m.remote) return null;
+    if (m.remote.configured === false) return "⚠️ 未设置";
+    if (m.remote.miss) return "⚠️ 未命中";
+    return m.remote.ok ? "✅ 可达" : "❌ 不可达";
+}
+
+// 探测网格：每格一个 flex 文本，行高写明（flex 行纪律）；colored 时延迟按通断着色
 function gridRows(items, size, cols, colored) {
     const rows = [];
     for (let i = 0; i < items.length; i += cols) {
@@ -499,15 +558,45 @@ function gridRows(items, size, cols, colored) {
                 cells.push({ ...T(`${it.flag} ${it.ms}`, size, C.soft, "regular", { minScale: 0.7 }), flex: 1 });
             }
         }
-        rows.push(hrow(cells, size, { gap: 6 }));
+        rows.push(row(cells, { gap: 6, height: LH(size) }));
     }
     return rows;
 }
 
-// 远端探测状态词：未填地址时是「未设置」，与真不通区分开
-function remoteStatus(m) {
+// 浅底圆角卡片：把一段内容成块呈现（广电数据卡片式）
+function card(children) {
+    return col(children, {
+        padding: [7, 9],
+        gap: 4,
+        borderRadius: 12,
+        backgroundColor: C.card,
+    });
+}
+
+// 远端探测卡片：标题行 + 六国网格（+ 未设置时的启用提示）
+function probeCard(m, size, cols, withHint) {
     if (!m.remote) return null;
-    return m.remote.configured === false ? "⚠️ 未设置" : (m.remote.ok ? "✅ 可达" : "❌ 不可达");
+    const els = [sectionRow("远端探测", remoteStatus(m), size + 1)];
+    if (m.remote.items && m.remote.items.length > 0) {
+        els.push(...gridRows(m.remote.items, size, cols, false));
+    } else if (m.remote.error) {
+        els.push(T(m.remote.error, size, C.faint, "regular"));
+    }
+    if (withHint && m.remote.configured === false) {
+        els.push(T("节点出口未知：在模块里填服务器地址和端口后启用", size - 1, C.faint, "regular", { minScale: 0.7 }));
+    } else if (withHint && m.remote.auto) {
+        els.push(T(`自动探测 ${m.remote.target}（出口IP+443）${m.remote.miss ? "：未命中多半是中转或非 443 端口" : ""}`, size - 1, C.faint, "regular", { minScale: 0.7 }));
+    }
+    return card(els);
+}
+
+// 国内探测卡片：标题行 + 三网网格（延迟着色）
+function domesticCard(m, size, cells) {
+    if (!m.analysis || !m.domestic.length) return null;
+    return card([
+        sectionRow("国内探测", m.domestic.some((p) => p.ok) ? "✅ 可达" : "❌ 不可达", size + 1),
+        ...gridRows(cells.map((p) => ({ label: p.label, ms: p.ms, ok: p.ok })), size, 2, true),
+    ]);
 }
 
 function viaDetails(m, size) {
@@ -521,93 +610,66 @@ function viaDetails(m, size) {
 }
 
 /* 大号 / 超大号：完整面板（段落、顺序、用词同原版）。
- * 高度预算（大号可用约 320pt）：最重场景 = 节点不通（无出口明细）+ 远端 3 行网格
- * + 国内每家一行代表探针 + 两行结论，约 320pt 内；超大号国内网格放宽到 6 格。 */
+ * 国内网格：大号每家运营商一个代表探针，超大号放宽到 6 格；全量在通知面板里。 */
 function largeWidget(m, xl = false) {
     const sec = 15, det = 12.5, concl = 17;
-    const els = [titleRow(m, 14)];
-    els.push(sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", sec));
-    els.push(...viaDetails(m, det));
-    els.push(sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec));
-    if (m.remote) {
-        els.push(sectionRow("远端探测", remoteStatus(m), sec));
-        if (m.remote.items && m.remote.items.length > 0) {
-            els.push(...gridRows(m.remote.items, det, 2, false));
-        } else if (m.remote.error) {
-            els.push(hrow([T(m.remote.error, det, C.faint, "regular")], det));
-        }
-        if (m.remote.configured === false) {
-            els.push(hrow([T("在模块里填该节点的服务器地址和端口后自动启用", 11, C.faint, "regular", { minScale: 0.7 })], 11, { padding: [0, 0, 0, 10] }));
-        }
-    }
+    let domesticCells = [];
     if (m.analysis && m.domestic.length > 0) {
-        els.push(sectionRow("国内探测", m.domestic.some((p) => p.ok) ? "✅ 可达" : "❌ 不可达", sec));
-        // 每家运营商取第一个探针（大号 3 格 2 行；超大号 6 格 3 行），全量在通知面板里
-        const seen = new Set();
-        const reps = m.domestic.filter((p) => {
-            const isp = p.label.split("·")[0];
-            if (seen.has(isp)) return false;
-            seen.add(isp);
-            return true;
-        });
-        const cells = xl ? m.domestic.slice(0, 6) : reps;
-        els.push(...gridRows(cells.map((p) => ({ label: p.label, ms: p.ms, ok: p.ok })), det, 2, true));
+        if (xl) {
+            domesticCells = m.domestic.slice(0, 6);
+        } else {
+            const seen = new Set();
+            domesticCells = m.domestic.filter((p) => {
+                const isp = p.label.split("·")[0];
+                if (seen.has(isp)) return false;
+                seen.add(isp);
+                return true;
+            });
+        }
     }
-    els.push(hrow([T("📋 诊断结论", sec, C.ink, "bold")], sec));
-    els.push({
-        ...T(m.conclusion, concl, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
-        height: LH(concl) * (m.conclusion.length > 14 ? 2 : 1),
-    });
-    els.push(spacer());
-    els.push(nodeRow(m, 12.5));
-    return root(els, [12, 14, 12, 14]);
+    return root([
+        titleRow(m, 14),
+        sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", sec),
+        ...viaDetails(m, det),
+        sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec),
+        probeCard(m, det, 2, true),
+        domesticCard(m, det, domesticCells),
+        T("📋 诊断结论", sec, C.ink, "bold"),
+        T(m.conclusion, concl, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
+        spacer(),
+        nodeRow(m, 12.5),
+    ], [12, 14], 6);
 }
 
-/* 中号：可用高约 139pt —— 精简版面板：标题行 + 节点代理（右侧出口 IP）
- * + 本机网络 + 远端探测（六国旗帜 3 列 × 2 行，未设置时占位）+ 单行结论
- * + 节点行（右侧时间）。总高恒定约 143pt，明细（位置/ISP、国内网格）在大号看。 */
+/* 中号：精简版面板 —— 页头 + 节点代理（右侧出口 IP）+ 本机网络
+ * + 远端探测卡片（六国旗帜 3 列 × 2 行）+ 单行结论 + 节点行。 */
 function mediumWidget(m) {
-    const sec = 12, det = 11, concl = 13.5;
-    const els = [titleRow(m, 11.5)];
-    // 节点代理（通时右侧带出口 IP）
-    els.push(hrow([
-        T("节点代理", sec, C.ink, "bold"),
-        T(m.via.ok ? "✅ 正常" : "❌ 不可达", sec, C.ink, "semibold"),
-        spacer(),
-        m.via.ok ? T(m.via.info.query, det, C.soft, "medium", { minScale: 0.6 }) : null,
-    ], sec, { gap: 6 }));
-    els.push(sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec));
-    // 远端探测常驻（未填地址时旗帜占位 + 未设置）；明细（位置/ISP）在大号与通知里
-    if (m.remote) {
-        els.push(sectionRow("远端探测", remoteStatus(m), sec));
-        if (m.remote.items && m.remote.items.length > 0) {
-            els.push(...gridRows(m.remote.items, 10, 3, false));
-        }
-    }
-    // 中号结论只占一行（长结论靠 minScale 缩放），保证总高恒定不溢出
-    els.push({
-        ...T(m.conclusion, concl, C.ink, "bold", { maxLines: 1, minScale: 0.55 }),
-        height: LH(concl),
-    });
-    els.push(nodeRow(m, det, true));
-    return root(els, [8, 12, 8, 12]);
+    const sec = 12.5, det = 11, concl = 14;
+    return root([
+        titleRow(m, 12),
+        row([
+            T("节点代理", sec, C.ink, "bold"),
+            T(m.via.ok ? "✅ 正常" : "❌ 不可达", sec, C.ink, "semibold"),
+            spacer(),
+            m.via.ok ? T(m.via.info.query, det, C.soft, "medium", { minScale: 0.6 }) : null,
+        ], { gap: 6 }),
+        sectionRow("本机网络", m.direct.ok ? "✅ 正常" : "❌ 异常", sec),
+        probeCard(m, 10.5, 3, false),
+        T(m.conclusion, concl, C.ink, "bold", { maxLines: 1, minScale: 0.55 }),
+        nodeRow(m, det, true),
+    ], [10, 12], 5);
 }
 
 function smallWidget(m) {
-    const els = [
+    return root([
         titleRow(m, 11),
-        { ...T(m.conclusion, 15, C.ink, "bold", { maxLines: 2, minScale: 0.65 }), height: LH(15) * (m.conclusion.length > 12 ? 2 : 1) },
+        T(m.conclusion, 15, C.ink, "bold", { maxLines: 2, minScale: 0.65 }),
         sectionRow("节点代理", m.via.ok ? "✅ 正常" : "❌ 不可达", 12),
-    ];
-    if (m.via.ok) {
-        els.push(hrow([T(`${getFlag(m.via.info.countryCode)} ${m.via.info.query}`, 12, C.soft, "regular", { minScale: 0.6 })], 12));
-    }
-    if (m.remote) {
-        els.push(sectionRow("远端探测", remoteStatus(m), 12));
-    }
-    els.push(spacer());
-    els.push(nodeRow(m, 11));
-    return root(els, [10, 12, 10, 12]);
+        m.via.ok ? T(`${getFlag(m.via.info.countryCode)} ${m.via.info.query}`, 12, C.soft, "regular", { minScale: 0.6 }) : null,
+        m.remote ? sectionRow("远端探测", remoteStatus(m), 12) : null,
+        spacer(),
+        nodeRow(m, 11),
+    ], [10, 12], 4);
 }
 
 function inlineWidget(m) {
