@@ -120,6 +120,12 @@ export default async function (ctx) {
 
                 }
 
+                // 临时诊断（定位 Tab 未生效后移除）：证明脚本确实执行到这里
+                console.log("[JD-AD] readCustomSurfaceList 已过滤，navigationOrder=" + result.navigationOrder);
+                try {
+                    ctx.notify("JD 导航脚本已运行", "过滤后顺序：" + result.navigationOrder);
+                } catch (e) {}
+
             }
 
         } else if (url.includes("functionId=myOrderInfo")) {
