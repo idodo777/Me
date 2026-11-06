@@ -1,18 +1,13 @@
 name: "萤石云视频净化"
-description: "去除开屏广告和角标广告，隐藏对话Tab"
+description: "去广告，隐藏对话Tab"
 author: "Muse"
 homepage: "https://apps.apple.com/app/id571195405"
-scriptings:
-  - http_response:
-      name: "萤石广告关闭"
+
+body_rewrites:
+  - response_jq:
       match: "^https://[^/]+\\.ys7\\.com/.*"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-splash.js?v=2"
-      body_required: true
-  - http_response:
-      name: "萤石隐藏对话Tab"
-      match: "^https://[^/]+\\.ys7\\.com/.*"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-tabs.js?v=2"
-      body_required: true
+      filter: "def flip: if type == \"object\" then to_entries | map( if (.key == \"adYsFlag\" or .key == \"adThirdFlag\") then (if (.value == 1 or .value == true or .value == \"1\") then .value = 0 else . end) else (.value |= flip) end ) | from_entries elif type == \"array\" then map(flip) else . end; (if (type == \"array\" and length > 0 and ([.[] | ((type == \"object\") and has(\"ad_type\") and (has(\"materiel\") or has(\"img\")))] | all)) then [] else flip end) | (if type != \"object\" then . elif (.grayConfigInfos | type) == \"object\" and (.grayConfigInfos[\"300045\"] | type) == \"object\" and (.grayConfigInfos[\"300045\"] | has(\"switchStatus\")) then .grayConfigInfos[\"300045\"].switchStatus |= (if type == \"string\" then \"0\" else 0 end) else . end)"
+
 mitm:
   hostnames:
     - "*.ys7.com"

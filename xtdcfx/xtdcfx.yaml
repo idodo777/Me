@@ -1,12 +1,10 @@
 name: "系统电池分析"
 description: "解锁会员"
 
-scriptings:
-  - http_response:
-      name: "xtdcfx"
+body_rewrites:
+  - response_jq:
       match: "^https?://apis\\.zhangthree\\.cn/vip/storekit/purchases/sync"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/xtdcfx/xtdcfx.js?v=2"
-      body_required: true
+      filter: "if type != \"object\" then . elif (.data | type) != \"object\" then . else .data += {\"member\":true,\"adFree\":true,\"entitlementStatus\":\"ACTIVE\",\"risk\":\"LOW\",\"action\":\"ALLOW\",\"serverVerifiedUntil\":\"2099-09-09T09:09:09Z\",\"vip\":true,\"expiresAt\":\"2099-09-09T09:09:09Z\",\"privileges\":[\"member\",\"vip\",\"ad_free\"],\"offlineGraceUntil\":\"2099-09-09T09:09:09Z\",\"signedEntitlementToken\":\"TEST_SIGNED_ENTITLEMENT_TOKEN\"} end"
 
 mitm:
   hostnames:
