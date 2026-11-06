@@ -406,7 +406,9 @@ export default async function (ctx) {
 
         }
 
-        return { body: JSON.stringify(obj) };
+        // 按官方套路回传对象（{body: data}），不要回传 JSON 字符串——实测字符串形式
+        // 脚本照常运行、通知照发，但改写不落到 App 上。
+        return { body: obj };
 
     } catch (error) {
 
