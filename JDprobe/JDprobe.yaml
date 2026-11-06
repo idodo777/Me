@@ -1,0 +1,9 @@
+name: "京东探针"
+description: "临时测试"
+rules:
+  - url_regex:
+      match: ".*functionId=welcomeHome.*"
+      policy: "REJECT"
+mitm:
+  hostnames:
+    - "api.m.jd.com"
