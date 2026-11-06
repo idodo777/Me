@@ -121,9 +121,8 @@ export default async function (ctx) {
                 }
 
                 // 临时诊断（定位 Tab 未生效后移除）：证明脚本确实执行到这里
-                console.log("[JD-AD] readCustomSurfaceList 已过滤，navigationOrder=" + result.navigationOrder);
                 try {
-                    ctx.notify("JD 导航脚本已运行", "过滤后顺序：" + result.navigationOrder);
+                    ctx.notify({ title: "JD 导航脚本已运行", body: "过滤后顺序：" + result.navigationOrder });
                 } catch (e) {}
 
             }
@@ -399,9 +398,8 @@ export default async function (ctx) {
 
     } catch (error) {
 
-        console.log("[JD-AD] ERROR = " + error);
-
-        // 出错默认放行
+        // 出错默认放行（日志本身也要防失败：Egern 沙箱不保证有 console）
+        try { console.log("[JD-AD] ERROR = " + error); } catch (e) {}
         return;
 
     }

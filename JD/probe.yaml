@@ -7,7 +7,7 @@ scriptings:
   - http_response:
       name: "京东脚本探针"
       match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=welcomeHome"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JD/probe.js?v=1"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JD/probe.js?v=2"
       body_required: true
       timeout: 20
 
