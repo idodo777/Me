@@ -9,10 +9,16 @@
  * 本文件为 Egern 移植：$request/$response/$done 已换成 ctx 写法，
  * 处理逻辑与原版逐条一致；解析失败或任何异常一律放行（fail-open）。
  *
- * 处理 api.m.jd.com/client.action 的 7 个 functionId：
+ * 处理 api.m.jd.com/client.action 的 8 个 functionId：
  * start（开屏）、welcomeHome（首页配置）、personinfoBusiness（个人页）、
  * myOrderInfo（订单页）、deliverLayer / orderTrackBusiness（物流页）、
- * getTabHomeInfo（新品页）。
+ * getTabHomeInfo（新品页）、readCustomSurfaceList（底部导航）。
+ *
+ * 本地增补（2026-11-06，据用户实抓 HAR 定位）：
+ * - readCustomSurfaceList：底部 Tab 为服务端下发，过滤「逛」(functionId=find)，
+ *   同步改 navigationOrder 与明/暗两套 navigationAll/navigation 并重排 position。
+ * - welcomeHome：删除 hybrid 楼层数据里的 configTips / cycleTips
+ *   （首页右上角轮播推广小卡的 tips 槽位）。
  * ============================================================
  */
 
@@ -59,6 +65,60 @@ export default async function (ctx) {
 
                 // 新品页 下拉二楼
                 delete obj.result.roofTop;
+
+            }
+
+        } else if (url.includes("functionId=readCustomSurfaceList")) {
+
+            // 底部导航（服务端下发）：移除「逛」Tab
+
+            const result = obj?.result;
+
+            if (result) {
+
+                // 顺序串：index,find,messagenew,cart,home → 去掉 find
+                if (typeof result.navigationOrder === "string") {
+                    result.navigationOrder = result.navigationOrder
+                        .split(",")
+                        .filter((i) => i && i !== "find")
+                        .join(",");
+                }
+
+                // 明/暗两套模式各有一份 Tab 定义
+                const modes = result.modeMap ? Object.values(result.modeMap) : [];
+
+                for (const mode of modes) {
+
+                    if (!mode) continue;
+
+                    // 先记住「逛」的图标指纹，navigation 精简版靠它对齐
+                    const removedMd5 = new Set();
+
+                    if (Array.isArray(mode.navigationAll)) {
+
+                        for (const item of mode.navigationAll) {
+                            if (item?.functionId === "find") {
+                                if (item.lableImageMd5) removedMd5.add(item.lableImageMd5);
+                                if (item.optlableImageMd5) removedMd5.add(item.optlableImageMd5);
+                            }
+                        }
+
+                        mode.navigationAll = mode.navigationAll.filter((i) => i?.functionId !== "find");
+
+                        // position 是序号，删后重排
+                        mode.navigationAll.forEach((item, idx) => {
+                            if (item) item.position = idx + 1;
+                        });
+
+                    }
+
+                    if (Array.isArray(mode.navigation) && removedMd5.size > 0) {
+                        mode.navigation = mode.navigation.filter(
+                            (i) => !(removedMd5.has(i?.lableImageMd5) || removedMd5.has(i?.optlableImageMd5))
+                        );
+                    }
+
+                }
 
             }
 
@@ -289,6 +349,31 @@ export default async function (ctx) {
 
                 // 首页 图层列表
                 obj.floorList = obj.floorList.filter((i) => !delItems?.includes(i?.type));
+
+            }
+
+            // 首页 右上角轮播推广小卡（tips 槽位，如「疯狂周末 低至5折起」）
+            if (obj?.floorList?.length > 0) {
+
+                for (const floor of obj.floorList) {
+
+                    const subs = floor?.content?.subFloors;
+                    if (!Array.isArray(subs)) continue;
+
+                    for (const sub of subs) {
+
+                        if (!Array.isArray(sub?.data)) continue;
+
+                        for (const item of sub.data) {
+                            if (item && typeof item === "object") {
+                                if (item.configTips) delete item.configTips;
+                                if (item.cycleTips) delete item.cycleTips;
+                            }
+                        }
+
+                    }
+
+                }
 
             }
 
