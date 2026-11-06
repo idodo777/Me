@@ -23,6 +23,8 @@ url_rewrites:
     location: "http://reject-dict/"
   - match: "^https?://m\\.360buyimg\\.com/mobilecms/s1125x2436_jfs"
     location: "http://reject-200/"
+  - match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=cornerCarousel"
+    location: "http://reject-dict/"
 
 body_rewrites:
   - response_jq:
@@ -49,9 +51,6 @@ body_rewrites:
   - response_jq:
       match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=personinfoBusiness"
       filter: "[\"applezhushou\",\"lingjindouxin\",\"dongdongnongchangxin\",\"chongwangwang\",\"kehufuwu\",\"xianzhiguanjia\",\"wenyisheng\",\"jijianfuwu\",\"zhuanzuanhongbao\",\"huanletaojin\"] as $SL | if (.floors | type) == \"array\" then .floors |= map( select(if type == \"object\" then (.mId as $m | [\"bigSaleFloor\",\"buyOften\",\"newAttentionCard\",\"newBigSaleFloor\",\"newStyleAttentionCard\",\"newsFloor\",\"noticeFloor\",\"recommendfloor\"] | index($m) | not) else true end) | if .mId == \"basefloorinfo\" and (.data | type) == \"object\" then del(.data.commonPopup, .data.commonPopup_dynamic, .data.floatLayer) | (if (.data.commonTips | type) == \"array\" and (.data.commonTips | length) > 0 then .data.commonTips = [] else . end) | (if (.data.commonWindows | type) == \"array\" and (.data.commonWindows | length) > 0 then .data.commonWindows = [] else . end) elif .mId == \"iconToolFloor\" and (.data.nodes | type) == \"array\" then .data.nodes |= ( (if (.[0] | type) == \"array\" and (.[0] | length) > 0 then .[0] |= (map(select(.functionId as $f | $SL | index($f))) | sort_by(.functionId as $f | $SL | index($f))) else . end) | (if (.[1] | type) == \"array\" and (.[1] | length) > 0 then .[1] |= (map(select(.functionId as $f | $SL | index($f))) | sort_by(.functionId as $f | $SL | index($f))) else . end) ) elif .mId == \"orderIdFloor\" then (if (.data.commentRemindInfo.infos | type) == \"array\" and (.data.commentRemindInfo.infos | length) > 0 then .data.commentRemindInfo.infos = [] else . end) elif .mId == \"userinfo\" then del(.data.newPlusBlackCard) else . end ) else . end"
-  - response_jq:
-      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=cornerCarousel"
-      filter: "if type != \"object\" then . elif (.data | type) != \"object\" then . elif (.data.cornerInfoList | type) != \"array\" then . else .data.cornerInfoList = [] end"
 
 mitm:
   hostnames:
