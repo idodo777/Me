@@ -1,9 +1,10 @@
 name: "京东探针"
 description: "临时测试"
-rules:
-  - url_regex:
-      match: ".*functionId=welcomeHome.*"
-      policy: "REJECT"
+scriptings:
+  - http_request:
+      name: "abort-welcomeHome"
+      match: "https://api\\.m\\.jd\\.com/client\\.action\\?functionId=welcomeHome"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JDprobe/abort-probe.js?v=1"
 mitm:
   hostnames:
     - "api.m.jd.com"
