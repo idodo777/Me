@@ -25,6 +25,8 @@ url_rewrites:
     location: "http://reject-dict/"
   - match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=getBubbleInfo"
     location: "http://reject-dict/"
+  - match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=xview2Config"
+    location: "http://reject-dict/"
   - match: "^https?://m\\.360buyimg\\.com/mobilecms/s1125x2436_jfs"
     location: "http://reject-200/"
   - match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=cornerCarousel"
@@ -39,7 +41,7 @@ body_rewrites:
       filter: "if (.result | type) == \"object\" then (if (.result.navigationOrder | type) == \"string\" then .result.navigationOrder |= (split(\",\") | map(select(. != \"\" and . != \"find\")) | join(\",\")) else . end) | (if (.result.modeMap | type) == \"object\" then .result.modeMap |= with_entries(.value |= ( ([(.navigationAll // [])[] | select(.functionId == \"find\") | .lableImageMd5, .optlableImageMd5] | map(select(. != null))) as $removed | (if (.navigationAll | type) == \"array\" then .navigationAll |= (map(select(.functionId != \"find\")) | [to_entries[] | .value.position = (.key + 1) | .value]) else . end) | (if (.navigation | type) == \"array\" and ($removed | length) > 0 then .navigation |= map(select((.lableImageMd5 as $a | $removed | index($a) | not) and (.optlableImageMd5 as $b | $removed | index($b) | not))) else . end) )) else . end) else . end"
   - response_jq:
       match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=welcomeHome"
-      filter: "(if (.floorList | type) == \"array\" then .floorList |= map(if type == \"object\" then select(.type as $t | [\"bottomXview\",\"float\",\"photoCeiling\",\"ruleFloat\",\"searchIcon\",\"topRotate\",\"tabBarAtmosphere\"] | index($t) | not) else . end) else . end) | (if (.floorList | type) == \"array\" then .floorList |= map( if type != \"object\" then . elif (.content | type) != \"object\" then . elif (.content.subFloors | type) != \"array\" then . else .content.subFloors |= map( if type != \"object\" then . elif (.data | type) != \"array\" then . else .data |= map(if type == \"object\" then del(.configTips, .cycleTips) else . end) end) end ) else . end) | (if (.webViewFloorList | type) == \"array\" and (.webViewFloorList | length) > 0 then .webViewFloorList = [] else . end)"
+      filter: "(if (.floorList | type) == \"array\" then .floorList |= map(if type == \"object\" then select(.type as $t | [\"bottomXview\",\"float\",\"photoCeiling\",\"ruleFloat\",\"searchIcon\",\"topRotate\",\"tabBarAtmosphere\"] | index($t) | not) else . end) else . end) | (if (.floorList | type) == \"array\" then .floorList |= map( if type != \"object\" then . elif (.content | type) != \"object\" then . elif (.content.subFloors | type) != \"array\" then . else .content.subFloors |= map( if type != \"object\" then . elif (.data | type) != \"array\" then . else .data |= map(if type == \"object\" then del(.configTips, .cycleTips, .outBanner) | if has(\"banners\") then .banners = [] else . end else . end) end) end ) else . end) | (if (.webViewFloorList | type) == \"array\" and (.webViewFloorList | length) > 0 then .webViewFloorList = [] else . end)"
   - response_jq:
       match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=(deliverLayer|orderTrackBusiness)"
       filter: "del(.bannerInfo) | if (.floors | type) == \"array\" then .floors |= map(select(if type == \"object\" then (.mId as $m | [\"banner\",\"jdDeliveryBanner\"] | index($m) | not) else true end)) else . end"
