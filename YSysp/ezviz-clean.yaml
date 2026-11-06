@@ -6,12 +6,12 @@ scriptings:
   - http_response:
       name: "萤石广告关闭"
       match: "^https://[^/]+\\.ys7\\.com/.*"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-splash.js"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-splash.js?v=2"
       body_required: true
   - http_response:
       name: "萤石隐藏对话Tab"
       match: "^https://[^/]+\\.ys7\\.com/.*"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-tabs.js"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/YSysp/ezviz-tabs.js?v=2"
       body_required: true
 mitm:
   hostnames:

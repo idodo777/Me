@@ -5,7 +5,7 @@ scriptings:
   - http_response:
       name: "buyitunes"
       match: "^https?://buy\\.itunes\\.apple\\.com/verifyReceipt$"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/buyitunes/buyitunes.js?v=1"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/buyitunes/buyitunes.js?v=2"
       body_required: true
 
 mitm:

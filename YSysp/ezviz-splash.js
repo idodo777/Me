@@ -38,7 +38,10 @@ function isAdArray(data) {
 
 export default async function (ctx) {
   try {
-    const data = await ctx.response.json();
+    // 不要用 ctx.response.json()：实测在 Egern 中会抛 pattern SyntaxError。
+    let data = null;
+    try { const t = await ctx.response.text(); data = t ? JSON.parse(t) : null; } catch (e) { data = null; }
+    if (data == null) { try { const b = await ctx.response.arrayBuffer(); data = JSON.parse(new TextDecoder('utf-8').decode(b)); } catch (e) { data = null; } }
     if (!data || typeof data !== 'object') return;
     if (isAdArray(data)) return { body: [] };
     if (flipFlags(data, 0)) return { body: data };

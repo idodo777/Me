@@ -25,7 +25,10 @@ const PATCH = {
 
 export default async function (ctx) {
   try {
-    const ddm = await ctx.response.json();
+    // 不要用 ctx.response.json()：实测在 Egern 中会抛 pattern SyntaxError。
+    let ddm = null;
+    try { const t = await ctx.response.text(); ddm = t ? JSON.parse(t) : null; } catch (e) { ddm = null; }
+    if (ddm == null) { try { const b = await ctx.response.arrayBuffer(); ddm = JSON.parse(new TextDecoder('utf-8').decode(b)); } catch (e) { ddm = null; } }
     if (!ddm || typeof ddm !== "object" || !ddm.data || typeof ddm.data !== "object") return {};
     Object.assign(ddm.data, PATCH);
     return { body: JSON.stringify(ddm) };
