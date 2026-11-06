@@ -4,6 +4,22 @@ author: "idodo777"
 homepage: "https://github.com/idodo777/Me"
 
 rules:
+  - and:
+      match:
+        - domain_suffix:
+            match: "jd.com"
+        - protocol:
+            match: "quic"
+      policy: "REJECT"
+  - and:
+      match:
+        - domain_suffix:
+            match: "jd.com"
+        - protocol:
+            match: "udp"
+        - dest_port:
+            match: "443"
+      policy: "REJECT"
   - domain:
       match: "dns.jd.com"
       policy: "REJECT"
