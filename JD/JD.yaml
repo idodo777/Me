@@ -28,20 +28,27 @@ body_rewrites:
   - response_jq:
       match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=basicConfig"
       filter: "if .data.JDMessage.socketmonitor then .data.JDMessage.socketmonitor |= (.isSocketEstablishedAhead = 0 | .isSocketReport = 0) else . end | if .data.JDHttpToolKit.httpdns then .data.JDHttpToolKit.httpdns |= (.httpdns = 0) else . end"
-
-scriptings:
-  - http_response:
-      name: "京东去广告"
-      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=(deliverLayer|getTabHomeInfo|myOrderInfo|orderTrackBusiness|personinfoBusiness|readCustomSurfaceList|start|welcomeHome)"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JD/JD_remove_ads.js?v=6"
-      body_required: true
-      timeout: 20
-  - http_response:
-      name: "京东比价"
-      match: "^https?://in\\.m\\.jd\\.com/product/graphext/\\d+\\.html"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JD/JD_Price.js"
-      body_required: true
-      timeout: 30
+  - response_jq:
+      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=readCustomSurfaceList"
+      filter: "if (.result | type) == \"object\" then (if (.result.navigationOrder | type) == \"string\" then .result.navigationOrder |= (split(\",\") | map(select(. != \"\" and . != \"find\")) | join(\",\")) else . end) | (if (.result.modeMap | type) == \"object\" then .result.modeMap |= with_entries(.value |= ( ([(.navigationAll // [])[] | select(.functionId == \"find\") | .lableImageMd5, .optlableImageMd5] | map(select(. != null))) as $removed | (if (.navigationAll | type) == \"array\" then .navigationAll |= (map(select(.functionId != \"find\")) | [to_entries[] | .value.position = (.key + 1) | .value]) else . end) | (if (.navigation | type) == \"array\" and ($removed | length) > 0 then .navigation |= map(select((.lableImageMd5 as $a | $removed | index($a) | not) and (.optlableImageMd5 as $b | $removed | index($b) | not))) else . end) )) else . end) else . end"
+  - response_jq:
+      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=welcomeHome"
+      filter: "(if (.floorList | type) == \"array\" then .floorList |= map(if type == \"object\" then select(.type as $t | [\"bottomXview\",\"float\",\"photoCeiling\",\"ruleFloat\",\"searchIcon\",\"topRotate\",\"tabBarAtmosphere\"] | index($t) | not) else . end) else . end) | (if (.floorList | type) == \"array\" then .floorList |= map( if type != \"object\" then . elif (.content | type) != \"object\" then . elif (.content.subFloors | type) != \"array\" then . else .content.subFloors |= map( if type != \"object\" then . elif (.data | type) != \"array\" then . else .data |= map(if type == \"object\" then del(.configTips, .cycleTips) else . end) end) end ) else . end) | (if (.webViewFloorList | type) == \"array\" and (.webViewFloorList | length) > 0 then .webViewFloorList = [] else . end)"
+  - response_jq:
+      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=(deliverLayer|orderTrackBusiness)"
+      filter: "del(.bannerInfo) | if (.floors | type) == \"array\" then .floors |= map(select(if type == \"object\" then (.mId as $m | [\"banner\",\"jdDeliveryBanner\"] | index($m) | not) else true end)) else . end"
+  - response_jq:
+      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=getTabHomeInfo"
+      filter: "del(.result.iconInfo, .result.roofTop)"
+  - response_jq:
+      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=start"
+      filter: "(if (.images | type) == \"array\" and (.images | length) > 0 then .images = [] else . end) | (if .showTimesDaily then .showTimesDaily = 0 else . end)"
+  - response_jq:
+      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=myOrderInfo"
+      filter: "if (.floors | type) == \"array\" then .floors |= map( select(if type == \"object\" then (.mId as $m | [\"bannerFloor\",\"bpDynamicFloor\",\"plusFloor\"] | index($m) | not) else true end) | if .mId == \"virtualServiceCenter\" and (.data | type) == \"object\" then (if (.data.virtualServiceCenters | type) == \"array\" then .data.virtualServiceCenters |= map(if (.serviceList | type) == \"array\" then .serviceList |= map(select(.serviceTitle != \"精选特惠\")) else . end) else . end) elif .mId == \"customerServiceFloor\" and .data.moreText then del(.data.moreIcon, .data.moreIcon_dark) | .data.moreText = \" \" else . end ) else . end"
+  - response_jq:
+      match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=personinfoBusiness"
+      filter: "[\"applezhushou\",\"lingjindouxin\",\"dongdongnongchangxin\",\"chongwangwang\",\"kehufuwu\",\"xianzhiguanjia\",\"wenyisheng\",\"jijianfuwu\",\"zhuanzuanhongbao\",\"huanletaojin\"] as $SL | if (.floors | type) == \"array\" then .floors |= map( select(if type == \"object\" then (.mId as $m | [\"bigSaleFloor\",\"buyOften\",\"newAttentionCard\",\"newBigSaleFloor\",\"newStyleAttentionCard\",\"newsFloor\",\"noticeFloor\",\"recommendfloor\"] | index($m) | not) else true end) | if .mId == \"basefloorinfo\" and (.data | type) == \"object\" then del(.data.commonPopup, .data.commonPopup_dynamic, .data.floatLayer) | (if (.data.commonTips | type) == \"array\" and (.data.commonTips | length) > 0 then .data.commonTips = [] else . end) | (if (.data.commonWindows | type) == \"array\" and (.data.commonWindows | length) > 0 then .data.commonWindows = [] else . end) elif .mId == \"iconToolFloor\" and (.data.nodes | type) == \"array\" then .data.nodes |= ( (if (.[0] | type) == \"array\" and (.[0] | length) > 0 then .[0] |= (map(select(.functionId as $f | $SL | index($f))) | sort_by(.functionId as $f | $SL | index($f))) else . end) | (if (.[1] | type) == \"array\" and (.[1] | length) > 0 then .[1] |= (map(select(.functionId as $f | $SL | index($f))) | sort_by(.functionId as $f | $SL | index($f))) else . end) ) elif .mId == \"orderIdFloor\" then (if (.data.commentRemindInfo.infos | type) == \"array\" and (.data.commentRemindInfo.infos | length) > 0 then .data.commentRemindInfo.infos = [] else . end) elif .mId == \"userinfo\" then del(.data.newPlusBlackCard) else . end ) else . end"
 
 mitm:
   hostnames:
