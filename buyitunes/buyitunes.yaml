@@ -1,0 +1,13 @@
+name: "BuyiTunes多合一"
+description: "解锁会员"
+
+scriptings:
+  - http_response:
+      name: "buyitunes"
+      match: "^https?://buy\\.itunes\\.apple\\.com/verifyReceipt$"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/buyitunes/buyitunes.js?v=1"
+      body_required: true
+
+mitm:
+  hostnames:
+    - "buy.itunes.apple.com"
