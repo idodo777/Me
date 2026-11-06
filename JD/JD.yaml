@@ -32,34 +32,34 @@ rules:
       policy: "REJECT"
       no_resolve: true
   - url_regex:
-      match: "functionId=welcomeHome"
+      match: ".*functionId=welcomeHome.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=readCustomSurfaceList"
+      match: ".*functionId=readCustomSurfaceList.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=cornerCarousel"
+      match: ".*functionId=cornerCarousel.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=queryPagePopWindow"
+      match: ".*functionId=queryPagePopWindow.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=getBubbleInfo"
+      match: ".*functionId=getBubbleInfo.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=xview2Config"
+      match: ".*functionId=xview2Config.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=uniformRecommend9c"
+      match: ".*functionId=uniformRecommend9c.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=publicThirdAddress"
+      match: ".*functionId=publicThirdAddress.*"
       policy: "REJECT"
   - url_regex:
-      match: "functionId=(searchBoxWord|stationPullService|uniformRecommend[06])"
+      match: ".*functionId=(searchBoxWord|stationPullService|uniformRecommend[06]).*"
       policy: "REJECT"
   - url_regex:
-      match: "m\\.360buyimg\\.com/mobilecms/s1125x2436_jfs"
+      match: ".*m\\.360buyimg\\.com/mobilecms/s1125x2436_jfs.*"
       policy: "REJECT"
 
 mitm:
