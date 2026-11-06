@@ -33,7 +33,7 @@ scriptings:
   - http_response:
       name: "京东去广告"
       match: "^https://api\\.m\\.jd\\.com/client\\.action\\?functionId=(deliverLayer|getTabHomeInfo|myOrderInfo|orderTrackBusiness|personinfoBusiness|readCustomSurfaceList|start|welcomeHome)"
-      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JD/JD_remove_ads.js?v=4"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JD/JD_remove_ads.js?v=5"
       body_required: true
       timeout: 20
   - http_response:

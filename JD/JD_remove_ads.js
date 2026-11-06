@@ -28,7 +28,19 @@ export default async function (ctx) {
 
         const url = ctx.request.url;
 
-        let obj = await ctx.response.json();
+        // 注意：不要用 ctx.response.json()——实测在 Egern 里它对京东响应会抛
+        // SyntaxError: The string did not match the expected pattern.
+        // 改为自己读文本再 JSON.parse，解析不了就放行。
+        let raw = null;
+        try { raw = await ctx.response.text(); } catch (e) { raw = null; }
+        if (raw == null) {
+            try {
+                const buf = await ctx.response.arrayBuffer();
+                raw = new TextDecoder("utf-8").decode(buf);
+            } catch (e) { raw = null; }
+        }
+        let obj = null;
+        if (raw) { try { obj = JSON.parse(raw); } catch (e) { obj = null; } }
 
         if (!obj) return;
 
@@ -400,6 +412,7 @@ export default async function (ctx) {
 
         // 出错默认放行（日志本身也要防失败：Egern 沙箱不保证有 console）
         try { console.log("[JD-AD] ERROR = " + error); } catch (e) {}
+        try { ctx.notify({ title: "JD 脚本出错（已放行）", body: String(error) }); } catch (e) {}
         return;
 
     }
