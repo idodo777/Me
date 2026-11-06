@@ -1,0 +1,9 @@
+name: "京东通道测试"
+description: "临时测试"
+rules:
+  - domain:
+      match: "api.m.jd.com"
+      policy: "REJECT"
+  - domain:
+      match: "in.m.jd.com"
+      policy: "REJECT"
