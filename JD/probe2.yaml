@@ -1,0 +1,17 @@
+name: "回传验证探针"
+description: "脚本诊断"
+author: "idodo777"
+homepage: "https://github.com/idodo777/Me"
+
+scriptings:
+  - http_response:
+      name: "回传验证探针"
+      match: "^https://example\\.(com|org)/"
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/JD/probe2.js?v=1"
+      body_required: false
+      timeout: 10
+
+mitm:
+  hostnames:
+    - "example.com"
+    - "example.org"
