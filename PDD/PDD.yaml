@@ -1,6 +1,6 @@
 name: 拼多多去广告
 description: 拼多多去广告
-author: ZenmoFeiShi · skernelx · RuCu6
+author: ZenmoFeiShi · skernelx · RuCu6 · XiaoMan · Yi-r8
 homepage: https://github.com/idodo777/Me/tree/main/PDD
 rules:
 - and:
@@ -185,16 +185,26 @@ map_locals:
   headers:
     Content-Type: application/json
   body: '{}'
+- match: '^https?://api\.pinduoduo\.com(?::[0-9]+)?/api/social/mall/follow/hot/recommend(?:\?|$)'
+  status_code: 200
+  headers:
+    Content-Type: application/json
+  body: '{}'
+- match: '^https?://api\.pinduoduo\.com(?::[0-9]+)?/api/leporis/notification/clear_tab_red_dot(?:\?|$)'
+  status_code: 200
+  headers:
+    Content-Type: application/json
+  body: '{}'
 body_rewrites:
 - response_jq:
     match: '^https?://api\.pinduoduo\.com/api/alexa/homepage/hub(?:\?|$)'
-    filter: 'if (.result | type) == "object" then delpaths([["result","dy_module","irregular_banner_dy"],["result","icon_set"],["result","search_bar_hot_query"]]) | .result |= (if (.bottom_tabs | type) == "array" then .bottom_tabs |= map(select(.link | IN("index.html", "chat_list.html", "personal.html"))) else . end) | .result |= (if (.buffer_bottom_tabs | type) == "array" then .buffer_bottom_tabs |= map(select(.link | IN("index.html", "chat_list.html", "personal.html"))) else . end) | .result |= (if (.all_top_opts | type) == "array" then .all_top_opts |= map(del(.selected_image, .image, .height, .width)) else . end) else . end'
+    filter: 'if (.result | type) == "object" then delpaths([["result","dy_module","irregular_banner_dy"],["result","icon_set"],["result","search_bar_hot_query"],["result","home_screen_skin"]]) | .result |= (if (.bottom_tabs | type) == "array" then .bottom_tabs |= map(select(.link | IN("index.html", "chat_list.html", "personal.html"))) else . end) | .result |= (if (.buffer_bottom_tabs | type) == "array" then .buffer_bottom_tabs |= map(select(.link | IN("index.html", "chat_list.html", "personal.html"))) else . end) | .result |= (if (.selected_bottom_skin | type) == "object" then .selected_bottom_skin |= with_entries(select((.key != "9") and (.key != "14"))) else . end) | .result |= (if (.all_top_opts | type) == "array" then .all_top_opts |= (map(select((.tab_id == 1) or (.tab_id == 2) or (.tab_id == "1") or (.tab_id == "2"))) | map(del(.selected_image, .image, .height, .width))) else . end) | .result |= (if (.module_order | type) == "array" then .module_order |= map(select(.module_name != "community_goods")) else . end) else . end'
 - response_jq:
     match: '^https?://api\.pinduoduo\.com/search(?:\?|$)'
     filter: 'delpaths([["expansion"]])'
 - response_jq:
     match: '^https?://api\.pinduoduo\.com/api/philo/personal/hub(?:\?|$)'
-    filter: 'delpaths([["monthly_card_entrance"],["personal_center_style_v2_vo"],["icon_set","icons"],["icon_set","top_personal_icons"],["personal_banner"]])'
+    filter: 'delpaths([["monthly_card_entrance"],["personal_center_style_v2_vo"],["icon_set","icons"],["icon_set","top_personal_icons"],["personal_banner"],["wallet","entrance_text"]])'
 - response_jq:
     match: '^https?://api\.pinduoduo\.com/api/oak/integration/render(?:\?|$)'
     filter: 'delpaths([["bottom_section_list"],["ui","bottom_section"],["ui","live_section","float_info"]])'
@@ -207,12 +217,22 @@ body_rewrites:
 - response_jq:
     match: '^https?://api\.pinduoduo\.com/api/aristotle/order_list_v4(?:\?|$)'
     filter: 'if (.orders | type) == "array" then .orders |= map(if (.order_buttons | type) == "array" then .order_buttons |= map(del(.order_growth_tip)) else . end) else . end'
+- response_jq:
+    match: '^https?://api\.pinduoduo\.com/api/social/timeline/v4/get/entrance(?:\?|$)'
+    filter: '(if (.entrance | type) == "object" then .entrance.status = 0 | .entrance.content = [] else . end) | del(.entrance_icon_image)'
 scriptings:
 - http_response:
     name: 扫码取件页面净化
-    match: '^https?://m\.pinduoduo\.net/mdkd/package\?from_app_scan'
+    match: '^https?://m\.pinduoduo\.net/mdkd/package\?'
     script_url: https://raw.githubusercontent.com/idodo777/Me/main/PDD/pdd-scan.js?v=1
     body_required: true
+    timeout: 20
+- http_response:
+    name: 评价页精简
+    match: '^https?://m\.pinduoduo\.net/comment_result\.html\?'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PDD/pdd-comment.js?v=1
+    body_required: true
+    max_size: 5242880
     timeout: 20
 mitm:
   hostnames:
