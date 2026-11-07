@@ -1,0 +1,69 @@
+name: 基础依赖 3in1
+description: Boxjs、Sub.Store、Script.Hub 基础依赖三合一
+author: ChavyLeung · sub-store-org · Script-Hub-Org
+homepage: https://github.com/idodo777/Me/tree/main/Base3in1
+compat_arguments:
+  Notify: 开启通知
+compat_arguments_schema:
+  Notify:
+    name: Script Hub 通知
+    description: Script Hub 转换完成后的通知方式
+    default_value: 开启通知
+    options:
+    - 开启通知
+    - 关闭通知
+    - 跟随链接
+scriptings:
+- http_request:
+    name: Script Hub 前端
+    match: '^https?://script\.hub/($|edit/|reload)'
+    script_url: https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/script-hub.js
+    timeout: 300
+- http_request:
+    name: Script Hub 重写转换
+    match: '^https?://script\.hub/file/_start_/.+type=(?:qx-rewrite|surge-module|loon-plugin|all-module)'
+    script_url: https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/Rewrite-Parser.js
+    timeout: 300
+    env:
+      _compat.$argument: 'Notify={{{Notify}}}'
+- http_request:
+    name: Script Hub 规则集转换
+    match: '^https?://script\.hub/file/_start_/.+type=rule-set'
+    script_url: https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/rule-parser.js
+    timeout: 300
+    env:
+      _compat.$argument: 'Notify={{{Notify}}}'
+- http_request:
+    name: Script Hub 脚本转换
+    match: '^https?://script\.hub/convert/'
+    script_url: https://raw.githubusercontent.com/Script-Hub-Org/Script-Hub/main/script-converter.js
+    timeout: 300
+- http_request:
+    name: Sub-Store Core
+    match: '^https?://sub\.store/((download)|api/(preview|sync|(utils/node-info)))'
+    script_url: https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store-1.min.js
+    body_required: true
+    timeout: 600
+    max_size: -1
+- http_request:
+    name: Sub-Store Simple
+    match: '^https?://sub\.store'
+    script_url: https://github.com/sub-store-org/Sub-Store/releases/latest/download/sub-store-0.min.js
+    body_required: true
+    timeout: 600
+    max_size: -1
+- http_request:
+    name: BoxJS
+    match: '^https?://(.+\.)?boxjs\.(com|net)'
+    script_url: https://raw.githubusercontent.com/chavyleung/scripts/master/box/chavy.boxjs.js
+    body_required: true
+    timeout: 120
+mitm:
+  hostnames:
+  - script.hub
+  - '*.script.hub'
+  - sub.store
+  - boxjs.com
+  - boxjs.net
+  - '*.boxjs.com'
+  - '*.boxjs.net'
