@@ -1,0 +1,160 @@
+name: 酷安去广告
+description: 酷安去广告
+author: ZenmoFeiShi · walala · myouhi · xiaomaoJT（Surge 版：小慧）
+homepage: https://github.com/idodo777/Me/tree/main/Kuan
+rules:
+- domain_suffix:
+    match: pangolin-sdk-toutiao.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: pangolin-sdk-toutiao.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: pangolin-sdk-toutiao-b.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: pangolin-sdk-toutiao-b.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: pglstatp-toutiao.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: pglstatp-toutiao.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: pangle.io
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: pangle.io
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain:
+    match: ad.toutiao.com
+    policy: REJECT
+- and:
+    match:
+    - domain:
+        match: ad.toutiao.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: gdt.qq.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: gdt.qq.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: gdtimg.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: gdtimg.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: pgdt.gtimg.cn
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: pgdt.gtimg.cn
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: ad.qq.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: ad.qq.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: kuaishouzt.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: kuaishouzt.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: open.e.kuaishou.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: open.e.kuaishou.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: kwaiad.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: kwaiad.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: adkwai.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: adkwai.com
+    - protocol:
+        match: quic
+    policy: REJECT
+url_rewrites:
+  - match: "^https://api\\.coolapk\\.com/v6/search\\?.*type=hotSearch"
+    location: "http://reject-dict/"
+body_rewrites:
+  - response_jq:
+      match: "^https://api\\.coolapk\\.com/v6/main/init"
+      filter: "if (.data | type) != \"array\" then . else del(.data[]? | select(.entityId == 944 or .entityId == 945 or .entityId == 24455 or .entityId == 36839 or .entityId == 1635 or .title == \"关注\")) | .data |= map(if .entities then .entities |= map(select(.entityId != 1635 and .entityId != 2261 and .entityId != 1633 and .entityId != 413 and .entityId != 417 and .entityId != 1754 and .entityId != 1966 and .entityId != 2274 and .entityId != 1170 and .entityId != 1175 and .entityId != 1190 and .entityId != 2258 and .title != \"关注\")) else . end) end"
+  - response_jq:
+      match: "^https://api\\.coolapk\\.com/v6/main/indexV8"
+      filter: "if (.data | type) != \"array\" then . else .data |= map(select((.entityId != 32557 and .entityId != 29349 and .entityId != 28621) and (.entityTemplate != \"sponsorCard\") and (((.title // \"\") | test(\"值得买|红包\")) | not))) end"
+  - response_jq:
+      match: "^https://api\\.coolapk\\.com/v6/page/dataList"
+      filter: "if (.data | type) != \"array\" then . else .data |= map(select(.title != \"话题热议\" and (.entityTemplate != \"sponsorCard\") and (.entityId != 36104 and .entityId != 24309 and .entityId != 12889 and .entityId != 21063 and .entityId != 35730 and .entityId != 35846 and .entityId != 28374 and .entityId != 28375 and .entityId != 27332 and .entityId != 20090 and .entityId != 28773 and .entityId != 29343 and .entityId != 21106)) | if (.entities | type) == \"array\" then (.entities |= map(select(.title != \"睡个好觉需要什么？\" and .entityTemplate != \"sponsorCard\"))) else . end) end"
+  - response_jq:
+      match: "^https://api\\.coolapk\\.com/v6/account/loadConfig\\?key=my_page_card_config"
+      filter: "if (.data | type) != \"array\" then . else .data |= map(select(.entityType != \"textLink\" and (.entityId != 1001 and .entityId != 1003 and .entityId != 1004 and .entityId != 1005)) | if (.entities | type) == \"array\" then .entities |= map(select(.entityType != \"textLink\")) else . end) end"
+  - response_jq:
+      match: "^https://api\\.coolapk\\.com/v6/feed/detail"
+      filter: "if (.data | type) != \"object\" then . else .data.include_goods = [] | .data.include_goods_ids = [] | .data.detailSponsorCard = [] | if (.data.hotReplyRows | type) == \"array\" then .data.hotReplyRows |= map(select(.id != null)) else . end | if (.data.topReplyRows | type) == \"array\" then .data.topReplyRows |= map(select(.id != null)) else . end end"
+  - response_jq:
+      match: "^https://api\\.coolapk\\.com/v6/feed/replyList"
+      filter: "if (.data | type) != \"array\" then . else .data |= map(select(.id != null and .entityType != \"card\") | if (.replyRows | type) == \"array\" then .replyRows |= map(select(.id != null and .entityType != \"card\")) else . end) end"
+mitm:
+  hostnames:
+    - api.coolapk.com
