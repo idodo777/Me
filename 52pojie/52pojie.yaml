@@ -2,14 +2,12 @@ name: 吾爱破解签到
 description: 吾爱破解签到
 author: ONZ3V
 homepage: https://www.52pojie.cn/home.php
-manual: https://www.52pojie.cn/home.php
-icon: https://raw.githubusercontent.com/Yuheng0101/X/main/Assets/52pojie.png
 compat_arguments:
   GETCK: "true"
 compat_arguments_schema:
   GETCK:
     name: "抓取Cookie"
-    description: "打开后点上方主页登录吾爱破解并刷新页面，抓到Cookie后请关闭此开关"
+    description: "登录吾爱破解并刷新主页抓Cookie，抓到后关闭"
     default_value: "true"
     options:
     - "true"
