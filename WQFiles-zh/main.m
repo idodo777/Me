@@ -1662,7 +1662,7 @@ static UIImage *wq_github_mark(void)
         UIImage *src = [UIImage imageWithData:data];
         CGSize size = CGSizeMake(16, 16);
         UIGraphicsImageRenderer *renderer = [[UIGraphicsImageRenderer alloc] initWithSize:size];
-        mark = [[renderer imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+        mark = [[renderer imageWithActions:^(UIGraphicsImageRendererContext *__unused ctx) {
             [src drawInRect:CGRectMake(0, 0, size.width, size.height)];
         }] imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
     });
