@@ -752,7 +752,7 @@ static NSString *wq_folder_date_text(NSDate *date)
     if (paths.count == 0) return;
     NSString *message = [NSString stringWithFormat:
         @"这将永久删除 %lu 个完整备份及其中的全部内容，无法撤销。",
-        (unsigned long)paths.count, paths.count == 1 ? @"" : @"s"];
+        (unsigned long)paths.count];
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"删除备份？"
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
