@@ -1,0 +1,39 @@
+name: 构建 WQFiles 汉化版
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 工具链信息
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: 从上游取回应用图标（二进制文件不存本仓库）
+        run: |
+          mkdir -p WQFiles-zh/icons
+          cd WQFiles-zh/icons
+          BASE="https://raw.githubusercontent.com/kolbicz/WQFiles/78a41d009ba684aa9f6ca44b7ecfc4f06f11b9bd/icons"
+          for f in AppIcon1024.png "AppIcon40x40@2x.png" "AppIcon40x40@3x.png" "AppIcon60x60@2x.png" "AppIcon60x60@3x.png" "AppIcon76x76@2x~ipad.png" "AppIcon83.5x83.5@2x~ipad.png"; do
+            curl -fsSL "$BASE/$f" -o "$f"
+          done
+          ls -la
+
+      - name: 编译汉化版 IPA
+        run: |
+          chmod +x WQFiles-zh/build.sh WQFiles-zh/tests/*.sh
+          cd WQFiles-zh
+          WQFILES_FINAL_IPA="$GITHUB_WORKSPACE/WQFiles-zh.ipa" ./build.sh
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: WQFiles-zh-IPA
+          path: WQFiles-zh.ipa
+          if-no-files-found: error
