@@ -172,6 +172,7 @@ static void wqp_alert(UIViewController *host, NSString *title, NSString *message
 - (void)viewDidLoad
 {
     [super viewDidLoad];
+    self.tableView.estimatedSectionFooterHeight = 48;
     self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
     __weak typeof(self) weakSelf = self;
     if (self.isRoot) {
@@ -466,6 +467,16 @@ static void wqp_alert(UIViewController *host, NSString *title, NSString *message
         return [NSString stringWithFormat:@"%@ 属性列表 · %@", fmt, reason];
     }
     return [NSString stringWithFormat:@"%@ 属性列表。点按值进行编辑，滑动可删除或重命名，点 + 添加。", fmt];
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
+{
+    return wq_wrapping_footer([self tableView:tableView titleForFooterInSection:section], 20);
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
+{
+    return [self tableView:tableView titleForFooterInSection:section] ? UITableViewAutomaticDimension : CGFLOAT_MIN;
 }
 
 - (id)keyAt:(NSInteger)row

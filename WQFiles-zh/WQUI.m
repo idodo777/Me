@@ -31,6 +31,26 @@ NSString *wq_device_line(void)
                     : [NSString stringWithFormat:@"%@ · iOS %@", model, ver];
 }
 
+UIView *wq_wrapping_footer(NSString *text, CGFloat horizontalInset)
+{
+    if (!text.length) return nil;
+    UIView *view = [UIView new];
+    UILabel *label = [UILabel new];
+    label.text = text;
+    label.numberOfLines = 0;
+    label.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    label.textColor = UIColor.secondaryLabelColor;
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    [view addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.leadingAnchor constraintEqualToAnchor:view.leadingAnchor constant:horizontalInset],
+        [label.trailingAnchor constraintEqualToAnchor:view.trailingAnchor constant:-horizontalInset],
+        [label.topAnchor constraintEqualToAnchor:view.topAnchor constant:6],
+        [label.bottomAnchor constraintEqualToAnchor:view.bottomAnchor constant:-10],
+    ]];
+    return view;
+}
+
 // A small centered label with the device/iOS line, for a table header.
 UIView *wq_device_header(CGFloat width)
 {

@@ -414,6 +414,7 @@ static BOOL wq_dir_size_cancellable(NSString *dir, WQScanCancellation *cancellat
 {
     [super viewDidLoad];
     self.title = @"应用";
+    self.tableView.estimatedSectionFooterHeight = 48;
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
     search.searchResultsUpdater = self;
     search.obscuresBackgroundDuringPresentation = NO;
@@ -648,6 +649,16 @@ static void WQAppScanWatch(WQScanCancellation *cancellation, NSUInteger lastSeri
 {
     return @"点按应用可备份、恢复或清除它的 Documents 和 Library。请先关闭应用（在应用切换器中上滑关闭）；应用运行期间的操作不保证快照一致。"
             "备份存储在 WQFiles/AppBackups 中，在「文件」App 里可见。tmp 会按要求清除，但不会被备份或恢复。";
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
+{
+    return wq_wrapping_footer([self tableView:tableView titleForFooterInSection:section], 16);
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
+{
+    return [self tableView:tableView titleForFooterInSection:section] ? UITableViewAutomaticDimension : CGFLOAT_MIN;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath

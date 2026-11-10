@@ -385,6 +385,7 @@ static BOOL WQCacheValidateItem(WQCacheItem *item, NSString **reason)
 {
     [super viewDidLoad];
     self.title = @"缓存清理";
+    self.tableView.estimatedSectionFooterHeight = 48;
     self.tableView.tableHeaderView = wq_device_header(self.view.bounds.size.width);
     UISearchController *search = [[UISearchController alloc] initWithSearchResultsController:nil];
     search.searchResultsUpdater = self;
@@ -703,6 +704,16 @@ static BOOL WQCacheValidateItem(WQCacheItem *item, NSString **reason)
     NSArray<WQCacheItem *> *selected = [_items filteredArrayUsingPredicate:
         [NSPredicate predicateWithFormat:@"selected == YES"]];
     return [WQCacheFooterScope(selected) stringByAppendingString:@" 请先关闭正在运行的应用。"];
+}
+
+- (UIView *)tableView:(UITableView *)tableView viewForFooterInSection:(NSInteger)section
+{
+    return wq_wrapping_footer([self tableView:tableView titleForFooterInSection:section], 20);
+}
+
+- (CGFloat)tableView:(UITableView *)tableView heightForFooterInSection:(NSInteger)section
+{
+    return [self tableView:tableView titleForFooterInSection:section] ? UITableViewAutomaticDimension : CGFLOAT_MIN;
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath
