@@ -1,0 +1,68 @@
+name: "IP 纯净度"
+
+description: "检测出口 IP 纯净度"
+
+author: "vfelix7"
+
+icon: "shield.lefthalf.filled"
+
+
+env_schema:
+
+  POLICY:
+
+    name: "检测策略"
+
+    description: "检测哪个策略组或节点的出口 IP（如 Proxy、香港）；留空按 Egern 分流规则"
+
+  MARK_IP:
+
+    name: "IP 打码"
+
+    description: "隐藏 IP 中间段，默认开启"
+
+    default_value: "true"
+
+    options:
+
+      - "true"
+
+      - "false"
+
+  REFRESH_MINUTES:
+
+    name: "刷新间隔（分钟）"
+
+    default_value: "10"
+
+  LABEL:
+
+    name: "名称"
+
+    description: "用来区分多个小组件（小号、中号显示在右下角；大号不显示，「检测」一行已写明策略）；不填时显示检测策略名"
+
+
+scriptings:
+
+  - generic:
+
+      name: "ip-purity-widget"
+
+      script_url: "https://raw.githubusercontent.com/idodo777/Me/main/IPpurity/ip-purity.js"
+
+      update_interval: 600
+
+      timeout: 15
+
+
+widgets:
+
+  - name: "IP 纯净度"
+
+    script_name: "ip-purity-widget"
+
+
+# 不填任何参数也能用：检测 my.ippure.com 按分流规则走到的那个出口。
+# 想看某个落地节点的 IP，在「检测策略」里填它的节点名或策略组名。
+# 数据来自 https://my.ippure.com/v1/info
+# 自托管优化版：主数据带缓存与失败回退，不再每次刷新都请求接口；原作 vfelix7。
