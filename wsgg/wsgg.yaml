@@ -63,6 +63,7 @@ env_schema:
       - 甘肃
       - 青海
       - 宁夏
+      - 西藏
       - 新疆
   SGCC_TIERS:
     name: 阶梯分界（可选）
