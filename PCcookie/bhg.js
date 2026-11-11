@@ -4,6 +4,7 @@
 // 上游更新日期: 2026-10-28
 // 移植说明: 上游脚本逻辑原样保留，仅在外层把 Surge 环境 API 桥接到 Egern ctx。
 export default async function (ctx) {
+  if (!(ctx.env && ctx.env.BHG === "true")) return {}; // 本应用开关：在模块设置页打开后才抓取
   if (!String(ctx.request.headers.get('referer') || '').includes('wx1b1dda695dff82c8')) return {};
 
   // ---------- 环境桥 ----------
