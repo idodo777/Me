@@ -810,12 +810,16 @@ function parse(acc) {
   const owe = num(bill.historyOwe) > 0 || sum < 0;
   const last = uniq[uniq.length - 1] || null;
   const info = mq.dataInfo || {};
-  // 阶梯电价（年度累计）：已出账月份 + 还没出账的日用电
+  // 阶梯电价：手动参数（SGCC_TIERS / SGCC_PRICES）优先，其次省份表（SGCC_REGION 选省，数据 provinces.json），最后内置默认
   const pro = clean(u.proNo);
   const tierEnv = clean((globalThis.__sgEnv || {}).SGCC_TIERS);
   const priceEnv = clean((globalThis.__sgEnv || {}).SGCC_PRICES).split(/[,，\s]+/).map(Number).filter((x) => x > 0);
-  const priceTable = priceEnv.length >= 3 ? priceEnv.slice(0, 3) : [0.538, 0.588, 0.838]; // 默认浙江居民阶梯电价（用户 2026-11-11 确认）；其他省份在模块设置 SGCC_PRICES 里填
-  const tiers = (tierEnv || (!pro || pro === '11102' ? '2880,4800' : '')).split(/[,，\s]+/).map(Number).filter((x) => x > 0);
+  const regionName = clean((globalThis.__sgEnv || {}).SGCC_REGION);
+  const regionRow = regionName && Array.isArray(globalThis.__sgRegions) ? globalThis.__sgRegions.find((x) => x.short === regionName || x.name === regionName) : null;
+  const priceTable = priceEnv.length >= 3 ? priceEnv.slice(0, 3) : regionRow && regionRow.prices.length >= 3 ? regionRow.prices.slice(0, 3) : [0.538, 0.588, 0.838]; // 兜底浙江居民阶梯电价（用户 2026-11-11 确认）
+  const tiers = (tierEnv || (regionRow && regionRow.tiers.length >= 2 ? regionRow.tiers.join(',') : !pro || pro === '11102' ? '2880,4800' : '')).split(/[,，\s]+/).map(Number).filter((x) => x > 0);
+  const cycle = !tierEnv && regionRow && regionRow.tiers.length >= 2 ? regionRow.cycle : 'annual';
+  const monthUseV = Number.isFinite(num(acc.monthTotal)) ? num(acc.monthTotal) : monthDays.length ? monthDays.reduce((a, b) => a + b.v, 0) : NaN;
   const yearKey = String(now.getFullYear());
   const settled = months.filter((x) => x.key.startsWith(yearKey));
   const lastSet = settled.length ? settled[settled.length - 1].key : '';
@@ -823,10 +827,14 @@ function parse(acc) {
   if (!settled.length && Number.isFinite(num(info.totalEleNum))) yearTotal = num(info.totalEleNum);
   uniq.forEach((x) => { if (x.key.startsWith(yearKey) && x.key.slice(0, 6) > lastSet) yearTotal += x.v; });
   let tier = null;
-  if (tiers.length >= 2 && yearTotal > 0) {
-    const lv = yearTotal <= tiers[0] ? 1 : yearTotal <= tiers[1] ? 2 : 3;
-    tier = { lv, total: yearTotal, left: lv < 3 ? tiers[lv - 1] - yearTotal : 0, price: priceTable[lv - 1] };
+  if (tiers.length >= 2) {
+    const basis = cycle === 'monthly' ? monthUseV : cycle === 'bimonthly' ? monthUseV + (lastMonth ? lastMonth.v || 0 : 0) : yearTotal;
+    if (Number.isFinite(basis) && basis > 0) {
+      const lv = basis <= tiers[0] ? 1 : basis <= tiers[1] ? 2 : 3;
+      tier = { lv, total: basis, cycle, left: lv < 3 ? tiers[lv - 1] - basis : 0, price: priceTable[lv - 1] };
+    }
   }
+  const flatPrice = !tier && regionRow && regionRow.prices.length === 1 && priceEnv.length < 3 ? regionRow.prices[0] : NaN;
   // 预计可用天数：余额 ÷（近 7 天日均电量 × 单价）
   let estDays = num(bill.dayNum);
   if (!Number.isFinite(estDays) && !owe && Number.isFinite(sum) && sum > 0) {
@@ -847,11 +855,12 @@ function parse(acc) {
     billDate: clean(bill.date),
     yesterday: last ? last.v : NaN,
     yesterdayKey: last ? last.key : '',
-    monthUse: Number.isFinite(num(acc.monthTotal)) ? num(acc.monthTotal) : monthDays.length ? monthDays.reduce((a, b) => a + b.v, 0) : NaN,
+    monthUse: monthUseV,
     lastMonth,
     yearUse: num(info.totalEleNum),
     yearCost: num(info.totalEleCost),
     tier,
+    flatPrice,
     daily: uniq.slice(-30),
     months: months.filter((x) => x.key.startsWith(String(now.getFullYear()))),
   };
@@ -1092,6 +1101,7 @@ function header(p, ts, compact) {
     ...(!compact && p.miss ? [T(`没找到户号 ${p.miss}`, 9, C.warn, 'medium')] : []),
     spacer(),
     ...(!compact && p.tier && Number.isFinite(p.tier.price) ? [T(`当前${TIER_CN[p.tier.lv]}：¥${p.tier.price}/度`, 10, C.dim, 'medium')] : []),
+    ...(!compact && !p.tier && Number.isFinite(p.flatPrice) ? [T(`¥${p.flatPrice}/度`, 10, C.dim, 'medium')] : []),
     icon('arrow.clockwise', C.faint, 9),
     T(updText(ts), 10, C.dim),
   ], { gap: 5, height: 20 });
@@ -1101,7 +1111,7 @@ const TIER_CN = ['', '一阶', '二阶', '三阶'];
 function tierText(p, short) {
   const t = p.tier;
   if (!t) return '';
-  if (t.lv >= 3) return short ? '三阶' : `三阶 · 年累计 ${fmt(t.total, 0)} 度`;
+  if (t.lv >= 3) return short ? '三阶' : `三阶 · ${t.cycle === 'monthly' ? '本月' : t.cycle === 'bimonthly' ? '近两月' : '年累计'} ${fmt(t.total, 0)} 度`;
   return short ? TIER_CN[t.lv] : `${TIER_CN[t.lv]} · 距${TIER_CN[t.lv + 1]} ${fmt(Math.max(0, t.left), 0)} 度`;
 }
 function tierColor(p) { return !p.tier ? C.faint : p.tier.lv === 1 ? C.ok : p.tier.lv === 2 ? C.warn : C.fail; }
@@ -1257,6 +1267,28 @@ function buildLock(p, r, family) {
   };
 }
 
+// 省份阶梯电价表：从本人仓库拉 provinces.json，缓存 7 天；拉不到就用缓存，再不行回退内置默认价，绝不阻塞小组件
+async function loadRegions(ctx, env) {
+  try {
+    if (!clean(env.SGCC_REGION)) return;
+    let cached = null;
+    try { cached = ctx.storage.getJSON('sgcc_regions_v1'); } catch (_) {}
+    if (cached && Array.isArray(cached.list) && cached.list.length) {
+      globalThis.__sgRegions = cached.list;
+      if (Date.now() - (cached.ts || 0) < 7 * 86400000) return;
+    }
+    try {
+      const r = await ctx.http.get('https://raw.githubusercontent.com/idodo777/Me/main/wsgg/provinces.json', { timeout: 6000 });
+      if (r && r.status && r.status !== 200) return;
+      const o = JSON.parse(await r.text());
+      if (o && Array.isArray(o.provinces) && o.provinces.length) {
+        globalThis.__sgRegions = o.provinces;
+        try { ctx.storage.setJSON('sgcc_regions_v1', { ts: Date.now(), list: o.provinces }); } catch (_) {}
+      }
+    } catch (_) {}
+  } catch (_) {}
+}
+
 export default async function (ctx) {
   const env = ctx.env || {};
   if (clean(env.SGCC_SCHEDULE) === 'true') {
@@ -1267,6 +1299,7 @@ export default async function (ctx) {
     return;
   }
   globalThis.__sgEnv = env;
+  await loadRegions(ctx, env);
   const family = ctx.widgetFamily || 'systemMedium';
   const r = await getData(ctx, false);
   if (!r.configured) return message('还没填写账号', '到 Egern「工具 → 模块 → 网上国网」里填写网上国网的手机号和密码，保存后刷新小组件。');
