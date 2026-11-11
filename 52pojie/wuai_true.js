@@ -1,6 +1,8 @@
 // 吾爱破解 · 抓取 Cookie（Egern 原生版）
 // 命中 home.php 请求时读取 Cookie 头，含 _auth 才保存；抓到后请关掉模块里的抓取开关。
 export default async function (ctx) {
+  // 抓取开关（模块设置页 GETCK）：关掉后直接放行，不抓取、不通知；未设置默认开
+  if (ctx.env && ctx.env.GETCK === "false") return {};
   try {
     const ck = ctx.request.headers.get('cookie') || '';
     if (ck && ck.includes('_auth=')) {
