@@ -814,7 +814,7 @@ function parse(acc) {
   const pro = clean(u.proNo);
   const regionName = clean((globalThis.__sgEnv || {}).SGCC_REGION);
   const regionRow = regionName && Array.isArray(globalThis.__sgRegions) ? globalThis.__sgRegions.find((x) => x.short === regionName || x.name === regionName) : null;
-  const priceTable = regionRow && regionRow.prices.length >= 3 ? regionRow.prices.slice(0, 3) : [0.538, 0.588, 0.838]; // 兜底浙江居民阶梯电价（用户 2026-11-11 确认）
+  const priceTable = regionRow && regionRow.prices.length >= 3 ? regionRow.prices.slice(0, 3) : [0.4883, 0.5383, 0.7883]; // 兜底北京居民阶梯电价（首都作默认，用户 2026-11-11 定）
   const tiers = (regionRow && regionRow.tiers.length >= 2 ? regionRow.tiers.join(',') : !pro || pro === '11102' ? '2880,4800' : '').split(/[,，\s]+/).map(Number).filter((x) => x > 0);
   const cycle = regionRow && regionRow.tiers.length >= 2 ? regionRow.cycle : 'annual';
   const monthUseV = Number.isFinite(num(acc.monthTotal)) ? num(acc.monthTotal) : monthDays.length ? monthDays.reduce((a, b) => a + b.v, 0) : NaN;

@@ -32,11 +32,11 @@ env_schema:
     default_value: ''
   SGCC_REGION:
     name: 所在省份
-    description: 选你家所在省份，阶梯电价和分界自动按该省切换，不用再填任何数字（数据表与模块同仓库，拉不到时用缓存或默认浙江价）
-    default_value: 浙江
+    description: 选你家所在省份，阶梯电价和分界自动按该省切换，不用再填任何数字（数据表与模块同仓库，拉不到时用缓存或默认北京价）
+    default_value: 北京
     options:
-      - 浙江
       - 北京
+      - 浙江
       - 天津
       - 河北
       - 山西
@@ -90,12 +90,12 @@ env_schema:
 scriptings:
 - generic:
     name: wsgg
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1705
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1715
     timeout: 90
 - schedule:
     name: 网上国网定时更新
     cron: '17 */6 * * *'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1705
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1715
     timeout: 90
     env:
       SGCC_SCHEDULE: 'true'
