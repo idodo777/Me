@@ -1,6 +1,6 @@
 // 吾爱破解 · 每日签到（Egern 原生版）
 // 机制：带 Cookie 领取 Discuz 签到任务 home.php?mod=task&do=apply&id=2，按返回文案判读结果；任何结果都发通知。
-(async () => {
+export default async function (ctx) {
   const TITLE = '吾爱破解签到';
   try {
     const ck = ctx.storage.get('wuai_cookie');
@@ -34,4 +34,4 @@
   } catch (e) {
     ctx.notify({ title: TITLE, body: '❌ 签到出错：' + (e && e.message ? e.message : String(e)) });
   }
-})();
+}

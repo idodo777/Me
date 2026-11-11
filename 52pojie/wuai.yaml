@@ -16,11 +16,11 @@ scriptings:
 - http_request:
     name: 吾爱破解获取Cookie
     match: '^https://www\.52pojie\.cn/home\.php\?'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/wuai_{{{GETCK}}}.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/wuai_{{{GETCK}}}.js?v=2
 - schedule:
     name: 吾爱破解签到
     cron: "30 10 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/wuai-sign.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/wuai-sign.js?v=2
 mitm:
   hostnames:
     - www.52pojie.cn
