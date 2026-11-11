@@ -8,26 +8,38 @@ name: QQ音乐签到
 description: QQ音乐签到
 author: MaYIHEI
 homepage: https://github.com/MaYIHEI/paperclip
+compat_arguments:
+  GETCK: "true"
+compat_arguments_schema:
+  GETCK:
+    name: "抓取Cookie"
+    description: "打开QQ音乐签到页抓Cookie，抓到后关闭"
+    default_value: "true"
+    options:
+    - "true"
+    - "false"
 scriptings:
 - http_request:
     name: QQ音乐 Cookie
     match: '^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
     body_required: true
+    env:
+      GETCK: "{{{GETCK}}}"
 - schedule:
     name: QQ音乐每日任务
     cron: "30 7 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
     timeout: 1200
 - schedule:
     name: QQ音乐定时金币
     cron: "* 9-10 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
     timeout: 1200
 - schedule:
     name: QQ音乐红包雨
     cron: "5 0,8,12,16,20,22 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
     timeout: 1200
 mitm:
   hostnames:

@@ -4,6 +4,8 @@
 // 上游更新日期: 2026-10-28
 // 移植说明: 上游脚本逻辑原样保留，仅在外层把 Surge 环境 API（$request/$persistentStore/$httpClient/$notification/$done）桥接到 Egern ctx。
 export default async function (ctx) {
+  // 抓取开关（模块参数 GETCK）：关闭时请求脚本直接放行，不抓取、不通知；定时任务不受影响
+  if (ctx.request && ctx.env && ctx.env.GETCK === "false") return {};
   // ---------- 环境桥 ----------
   let __request;
   if (ctx.request) {
