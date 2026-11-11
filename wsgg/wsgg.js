@@ -813,6 +813,8 @@ function parse(acc) {
   // 阶梯电价（年度累计）：已出账月份 + 还没出账的日用电
   const pro = clean(u.proNo);
   const tierEnv = clean((globalThis.__sgEnv || {}).SGCC_TIERS);
+  const priceEnv = clean((globalThis.__sgEnv || {}).SGCC_PRICES).split(/[,，\s]+/).map(Number).filter((x) => x > 0);
+  const priceTable = priceEnv.length >= 3 ? priceEnv.slice(0, 3) : [0.538, 0.588, 0.838]; // 默认浙江居民阶梯电价（用户 2026-11-11 确认）；其他省份在模块设置 SGCC_PRICES 里填
   const tiers = (tierEnv || (!pro || pro === '11102' ? '2880,4800' : '')).split(/[,，\s]+/).map(Number).filter((x) => x > 0);
   const yearKey = String(now.getFullYear());
   const settled = months.filter((x) => x.key.startsWith(yearKey));
@@ -823,7 +825,7 @@ function parse(acc) {
   let tier = null;
   if (tiers.length >= 2 && yearTotal > 0) {
     const lv = yearTotal <= tiers[0] ? 1 : yearTotal <= tiers[1] ? 2 : 3;
-    tier = { lv, total: yearTotal, left: lv < 3 ? tiers[lv - 1] - yearTotal : 0, price: [0.538, 0.588, 0.838][lv - 1] }; // 浙江居民阶梯电价（用户 2026-11-11 确认）
+    tier = { lv, total: yearTotal, left: lv < 3 ? tiers[lv - 1] - yearTotal : 0, price: priceTable[lv - 1] };
   }
   // 预计可用天数：余额 ÷（近 7 天日均电量 × 单价）
   let estDays = num(bill.dayNum);
@@ -831,7 +833,7 @@ function parse(acc) {
     const recent = uniq.slice(-7);
     const avg = recent.length ? recent.reduce((a, b) => a + b.v, 0) / recent.length : NaN;
     const priced = months.filter((x) => x.v > 0 && x.cost > 0).pop();
-    const price = tier && Number.isFinite(tier.price) ? tier.price : priced ? priced.cost / priced.v : 0.538;
+    const price = tier && Number.isFinite(tier.price) ? tier.price : priced ? priced.cost / priced.v : priceTable[0];
     if (avg > 0) estDays = Math.floor(sum / (avg * price));
   }
   return {
