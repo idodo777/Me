@@ -1,5 +1,5 @@
 name: 网上国网（Hark 液态玻璃版）
-description: 国家电网电费余额、昨日/本月/上月用电、近 30 日与月度柱状图；支持小/中/大号与锁屏。直连网上国网 App 接口，限流时自动改走 95598 网页接口，不经第三方网关；填写账号密码即可，每 6 小时自动更新
+description: 国家电网电费余额、昨日/本月/上月用电、近 30 日与月度柱状图；支持小/中/大号与锁屏。直连网上国网 App 接口，限流时自动改走 95598 网页接口，不经第三方网关；填写账号密码即可，每 6 小时自动更新；电价数据截止日期：2026年11月11日
 author: Hark（版式参考 jadkg 南方电网小组件；App 协议移植自 stevenjoezhang/hass-state-grid，MIT）
 icon: https://is1-ssl.mzstatic.com/image/thumb/Purple116/v4/83/d8/8a/83d88a92-5a4d-7a2f-118c-80d795e7a9f6/AppIcon-0-0-1x_U007emarketing-0-5-0-0-sRGB-85-220.png/144x144.png
 env_schema:
