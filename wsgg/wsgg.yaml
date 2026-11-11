@@ -32,7 +32,7 @@ env_schema:
     default_value: ''
   SGCC_REGION:
     name: 所在省份
-    description: 选你家所在省份，阶梯电价和分界自动按该省切换（数据表与模块同仓库，拉不到时用缓存或默认浙江价）；手动填了阶梯分界/阶梯电价的，以手动为准
+    description: 选你家所在省份，阶梯电价和分界自动按该省切换，不用再填任何数字（数据表与模块同仓库，拉不到时用缓存或默认浙江价）
     default_value: 浙江
     options:
       - 浙江
@@ -66,14 +66,6 @@ env_schema:
       - 宁夏
       - 西藏
       - 新疆
-  SGCC_TIERS:
-    name: 阶梯分界（可选）
-    description: 年用电阶梯分界度数，逗号分隔；北京默认 2880,4800，其他省份按当地标准填
-    default_value: ''
-  SGCC_PRICES:
-    name: 阶梯电价（可选）
-    description: 一/二/三阶每度电价，逗号分隔；留空用浙江居民价 0.538,0.588,0.838，其他省份按当地电价填这里，不用改脚本
-    default_value: ''
   SGCC_POLICY:
     name: 国网请求策略
     description: 国网接口默认直连；直连不通再填国内节点或策略组名
@@ -98,12 +90,12 @@ env_schema:
 scriptings:
 - generic:
     name: wsgg
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1645
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1705
     timeout: 90
 - schedule:
     name: 网上国网定时更新
     cron: '17 */6 * * *'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1645
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg.js?v=20261111-1705
     timeout: 90
     env:
       SGCC_SCHEDULE: 'true'

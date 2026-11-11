@@ -4,7 +4,7 @@
  * 数据：直接按网上国网 Android App 3.2.3 协议登录查询（SM2/SM3/SM4 加密 + Turing 设备令牌），不经过任何第三方网关。
  *   协议与设备令牌算法移植自 stevenjoezhang/hass-state-grid（MIT License, Copyright (c) 2026 stevenjoezhang）。
  * 环境变量：SGCC_USERNAME / SGCC_PASSWORD（网上国网账号密码）、SGCC_SMS（新设备短信验证码，提示时再填）、
- *          SGCC_ACCOUNT（多户号时填户号或尾号，或 #2 表示第 2 个；不同小组件可在小组件环境变量里各填一个）、SGCC_POLICY（请求策略，默认 DIRECT）、SGCC_REFRESH（刷新间隔小时，默认 6）、SGCC_TIERS（阶梯年用电分界，北京默认 2880,4800）。
+ *          SGCC_ACCOUNT（多户号时填户号或尾号，或 #2 表示第 2 个；不同小组件可在小组件环境变量里各填一个）、SGCC_POLICY（请求策略，默认 DIRECT）、SGCC_REFRESH（刷新间隔小时，默认 6）、SGCC_REGION（所在省份，阶梯电价与分界按 provinces.json 自动切换）。
  */
 
 // 会话、验证码、缓存按登录手机号分开存，多个账号的小组件互不覆盖
@@ -810,15 +810,13 @@ function parse(acc) {
   const owe = num(bill.historyOwe) > 0 || sum < 0;
   const last = uniq[uniq.length - 1] || null;
   const info = mq.dataInfo || {};
-  // 阶梯电价：手动参数（SGCC_TIERS / SGCC_PRICES）优先，其次省份表（SGCC_REGION 选省，数据 provinces.json），最后内置默认
+  // 阶梯电价：只认省份选择（SGCC_REGION，数据 provinces.json），选哪个省就用哪个省的价与分界；没选省时回退内置默认
   const pro = clean(u.proNo);
-  const tierEnv = clean((globalThis.__sgEnv || {}).SGCC_TIERS);
-  const priceEnv = clean((globalThis.__sgEnv || {}).SGCC_PRICES).split(/[,，\s]+/).map(Number).filter((x) => x > 0);
   const regionName = clean((globalThis.__sgEnv || {}).SGCC_REGION);
   const regionRow = regionName && Array.isArray(globalThis.__sgRegions) ? globalThis.__sgRegions.find((x) => x.short === regionName || x.name === regionName) : null;
-  const priceTable = priceEnv.length >= 3 ? priceEnv.slice(0, 3) : regionRow && regionRow.prices.length >= 3 ? regionRow.prices.slice(0, 3) : [0.538, 0.588, 0.838]; // 兜底浙江居民阶梯电价（用户 2026-11-11 确认）
-  const tiers = (tierEnv || (regionRow && regionRow.tiers.length >= 2 ? regionRow.tiers.join(',') : !pro || pro === '11102' ? '2880,4800' : '')).split(/[,，\s]+/).map(Number).filter((x) => x > 0);
-  const cycle = !tierEnv && regionRow && regionRow.tiers.length >= 2 ? regionRow.cycle : 'annual';
+  const priceTable = regionRow && regionRow.prices.length >= 3 ? regionRow.prices.slice(0, 3) : [0.538, 0.588, 0.838]; // 兜底浙江居民阶梯电价（用户 2026-11-11 确认）
+  const tiers = (regionRow && regionRow.tiers.length >= 2 ? regionRow.tiers.join(',') : !pro || pro === '11102' ? '2880,4800' : '').split(/[,，\s]+/).map(Number).filter((x) => x > 0);
+  const cycle = regionRow && regionRow.tiers.length >= 2 ? regionRow.cycle : 'annual';
   const monthUseV = Number.isFinite(num(acc.monthTotal)) ? num(acc.monthTotal) : monthDays.length ? monthDays.reduce((a, b) => a + b.v, 0) : NaN;
   const yearKey = String(now.getFullYear());
   const settled = months.filter((x) => x.key.startsWith(yearKey));
@@ -834,7 +832,7 @@ function parse(acc) {
       tier = { lv, total: basis, cycle, left: lv < 3 ? tiers[lv - 1] - basis : 0, price: priceTable[lv - 1] };
     }
   }
-  const flatPrice = !tier && regionRow && regionRow.prices.length === 1 && priceEnv.length < 3 ? regionRow.prices[0] : NaN;
+  const flatPrice = !tier && regionRow && regionRow.prices.length === 1 ? regionRow.prices[0] : NaN;
   // 预计可用天数：余额 ÷（近 7 天日均电量 × 单价）
   let estDays = num(bill.dayNum);
   if (!Number.isFinite(estDays) && !owe && Number.isFinite(sum) && sum > 0) {
