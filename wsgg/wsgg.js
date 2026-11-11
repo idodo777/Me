@@ -823,7 +823,7 @@ function parse(acc) {
   let tier = null;
   if (tiers.length >= 2 && yearTotal > 0) {
     const lv = yearTotal <= tiers[0] ? 1 : yearTotal <= tiers[1] ? 2 : 3;
-    tier = { lv, total: yearTotal, left: lv < 3 ? tiers[lv - 1] - yearTotal : 0, price: !tierEnv ? [0.4883, 0.5383, 0.7883][lv - 1] : NaN };
+    tier = { lv, total: yearTotal, left: lv < 3 ? tiers[lv - 1] - yearTotal : 0, price: [0.538, 0.588, 0.838][lv - 1] }; // 浙江居民阶梯电价（用户 2026-11-11 确认）
   }
   // 预计可用天数：余额 ÷（近 7 天日均电量 × 单价）
   let estDays = num(bill.dayNum);
@@ -831,7 +831,7 @@ function parse(acc) {
     const recent = uniq.slice(-7);
     const avg = recent.length ? recent.reduce((a, b) => a + b.v, 0) / recent.length : NaN;
     const priced = months.filter((x) => x.v > 0 && x.cost > 0).pop();
-    const price = tier && Number.isFinite(tier.price) ? tier.price : priced ? priced.cost / priced.v : 0.4883;
+    const price = tier && Number.isFinite(tier.price) ? tier.price : priced ? priced.cost / priced.v : 0.538;
     if (avg > 0) estDays = Math.floor(sum / (avg * price));
   }
   return {
@@ -1089,6 +1089,7 @@ function header(p, ts, compact) {
     ...(!compact && p.login ? [T(`账号${p.login}`, 9, C.faint)] : []),
     ...(!compact && p.miss ? [T(`没找到户号 ${p.miss}`, 9, C.warn, 'medium')] : []),
     spacer(),
+    ...(!compact && p.tier && Number.isFinite(p.tier.price) ? [T(`¥${p.tier.price}/度`, 10, C.dim, 'medium')] : []),
     icon('arrow.clockwise', C.faint, 9),
     T(updText(ts), 10, C.dim),
   ], { gap: 5, height: 20 });
