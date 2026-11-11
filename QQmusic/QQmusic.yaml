@@ -8,12 +8,10 @@ name: QQ音乐签到
 description: QQ音乐签到
 author: MaYIHEI
 homepage: https://github.com/MaYIHEI/paperclip
-compat_arguments:
-  GETCK: "true"
-compat_arguments_schema:
+env_schema:
   GETCK:
     name: "抓取Cookie"
-    description: "打开QQ音乐签到页抓Cookie，抓到后关闭"
+    description: "打开QQ音乐签到页抓Cookie，抓到后关闭；不设置时默认开启"
     default_value: "true"
     options:
     - "true"
@@ -24,8 +22,6 @@ scriptings:
     match: '^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary)'
     script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
     body_required: true
-    env:
-      GETCK: "{{{GETCK}}}"
 - schedule:
     name: QQ音乐每日任务
     cron: "30 7 * * *"
