@@ -1,0 +1,26 @@
+name: 吾爱破解签到
+description: 吾爱破解签到
+author: Muse
+homepage: https://www.52pojie.cn/home.php
+compat_arguments:
+  GETCK: "true"
+compat_arguments_schema:
+  GETCK:
+    name: "抓取Cookie"
+    description: "登录吾爱破解并刷新主页抓Cookie，抓到后关闭"
+    default_value: "true"
+    options:
+    - "true"
+    - "false"
+scriptings:
+- http_request:
+    name: 吾爱破解获取Cookie
+    match: '^https://www\.52pojie\.cn/home\.php\?'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/wuai_{{{GETCK}}}.js?v=1
+- schedule:
+    name: 吾爱破解签到
+    cron: "30 10 * * *"
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/wuai-sign.js?v=1
+mitm:
+  hostnames:
+    - www.52pojie.cn
