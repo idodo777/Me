@@ -9,4 +9,4 @@
 
 装的是自己账号的商店原版包：国区账号下的直接能打开；美区下的 App，手机上要登录过美区账号（设置→媒体与购买项目）才能打开。
 
-源码 installer.py 由 GitHub Actions 自动打包成 exe，发布在本仓库 Releases 的 installer-v1 里。
+实现：本地网页版助手（installer.py，标准库 HTTP 服务 + pymobiledevice3 装机）。分发形式为绿色包（嵌入式 Python 3.12 + 全部依赖 + START.bat），托管在取件站页面里供下载。
