@@ -18,7 +18,9 @@ export default async function (ctx) {
     });
     const body = await resp.text();
     let msg;
-    if (/恭喜|已完成|签到成功/.test(body)) {
+    if (/暂停签到|开放注册/.test(body)) {
+      msg = '⏸️ 吾爱开放注册期间暂停签到，站点恢复后会自动继续，不用管';
+    } else if (/恭喜|已完成|签到成功/.test(body)) {
       msg = '✅ 签到成功';
     } else if (/下期再来|已经签到|已签到|今日已签/.test(body)) {
       msg = '⚠️ 今天已经签过了';
