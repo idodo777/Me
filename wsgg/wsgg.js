@@ -1089,7 +1089,7 @@ function header(p, ts, compact) {
     ...(!compact && p.login ? [T(`账号${p.login}`, 9, C.faint)] : []),
     ...(!compact && p.miss ? [T(`没找到户号 ${p.miss}`, 9, C.warn, 'medium')] : []),
     spacer(),
-    ...(!compact && p.tier && Number.isFinite(p.tier.price) ? [T(`¥${p.tier.price}/度`, 10, C.dim, 'medium')] : []),
+    ...(!compact && p.tier && Number.isFinite(p.tier.price) ? [T(`当前${TIER_CN[p.tier.lv]}：¥${p.tier.price}/度`, 10, C.dim, 'medium')] : []),
     icon('arrow.clockwise', C.faint, 9),
     T(updText(ts), 10, C.dim),
   ], { gap: 5, height: 20 });
