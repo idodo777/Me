@@ -1,0 +1,369 @@
+// baidunetdisk · Cookie 抓取（Egern 移植版）
+// 原作: MaYIHEI
+// 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/baidunetdisk/baidunetdisk.js
+// 上游更新日期: 2026-10-28
+// 移植说明: 上游脚本逻辑原样保留，仅在外层把 Surge 环境 API 桥接到 Egern ctx。
+export default async function (ctx) {
+
+  // ---------- 环境桥 ----------
+  let __request, __response;
+  if (ctx.request) {
+    const __headers = {};
+    const __names = new Set(["cookie", "user-agent", "referer", "content-type", "host", "accept", "accept-language", "x-lf-channel", "authorization", "token"]);
+    try { if (typeof ctx.request.headers.forEach === "function") ctx.request.headers.forEach((v, k) => __names.add(String(k).toLowerCase())); } catch (e) {}
+    for (const __n of __names) {
+      try {
+        const __all = typeof ctx.request.headers.getAll === "function" ? ctx.request.headers.getAll(__n) : null;
+        if (__all && __all.length > 1) __headers[__n] = __all;
+        else { const __v = ctx.request.headers.get(__n); if (__v != null) __headers[__n] = __v; }
+      } catch (e) {}
+    }
+    let __body = "";
+    try { __body = await ctx.request.text(); } catch (e) {}
+    __request = { url: ctx.request.url, method: ctx.request.method, headers: __headers, body: __body };
+  }
+  if (ctx.response) {
+    const __rh = {};
+    try { if (typeof ctx.response.headers.forEach === "function") ctx.response.headers.forEach((v, k) => { __rh[String(k).toLowerCase()] = v; }); } catch (e) {}
+    let __rbody = "";
+    try { __rbody = await ctx.response.text(); } catch (e) {}
+    __response = { status: ctx.response.status, statusCode: ctx.response.status, headers: __rh, body: __rbody };
+  }
+  const __mk = (method) => (opts, cb) => {
+    (async () => {
+      try {
+        const __o = typeof opts === "string" ? { url: opts } : (opts || {});
+        const __init = { headers: __o.headers || {}, timeout: __o.timeout };
+        let __resp;
+        if (method === "GET") __resp = await ctx.http.get(__o.url, __init);
+        else if (method === "POST") __resp = await ctx.http.post(__o.url, { ...__init, body: __o.body });
+        else if (method === "PUT") __resp = await ctx.http.put(__o.url, { ...__init, body: __o.body });
+        else if (method === "DELETE") __resp = await ctx.http.delete(__o.url, __init);
+        else if (method === "PATCH") __resp = await ctx.http.patch(__o.url, { ...__init, body: __o.body });
+        else if (method === "HEAD") __resp = await ctx.http.head(__o.url, __init);
+        else __resp = await ctx.http.options(__o.url, __init);
+        const __text = await __resp.text();
+        const __hh = {};
+        try { if (__resp.headers && typeof __resp.headers.forEach === "function") __resp.headers.forEach((v, k) => { __hh[k] = v; }); } catch (e) {}
+        const __r = { status: __resp.status, statusCode: __resp.status, headers: __hh, body: __text };
+        cb(null, __r, __text);
+      } catch (e) {
+        cb(e && e.message ? e.message : String(e), null, null);
+      }
+    })();
+  };
+  globalThis.$httpClient = { get: __mk("GET"), post: __mk("POST"), put: __mk("PUT"), delete: __mk("DELETE"), head: __mk("HEAD"), options: __mk("OPTIONS"), patch: __mk("PATCH") };
+  globalThis.$persistentStore = {
+    read: (k) => { try { const v = ctx.storage.get(k); return v == null ? null : v; } catch (e) { return null; } },
+    write: (v, k) => { try { ctx.storage.set(k, v == null ? "" : String(v)); return true; } catch (e) { return false; } },
+  };
+  globalThis.$notification = { post: (t, s, b) => { try { ctx.notify({ title: t == null ? "" : String(t), subtitle: s ? String(s) : undefined, body: b == null ? "" : String(b) }); } catch (e) {} } };
+  globalThis.$environment = { "surge-version": "5.20.0" };
+  globalThis.$argument = {};
+  globalThis.$request = __request;
+  globalThis.$response = __response;
+  let __finish;
+  const __donePromise = new Promise((r) => { __finish = r; });
+  globalThis.$done = () => { try { __finish(); } catch (e) {} };
+
+  // ---------- 上游脚本（原样） ----------
+const $ = new Env("百度网盘");
+
+// 签到合集开启「统一通知」时不单独弹通知,结果由签到汇总统一发送
+$.merge = typeof $argument === "object" && !!$argument && $argument.merge === true;
+if ($.merge) $.msg = (...a) => console.log(a.filter((x) => typeof x === "string" && x).join("\n"));
+
+// 补签入口:请求 http://1.1.1.1/checkin/baidunetdisk 时现跑一次签到,跑完把本脚本的签到状态作为响应返回
+const CHECKIN_RUN = typeof $request !== 'undefined' && /^http:\/\/1\.1\.1\.1\/checkin\//.test($request.url);
+if (CHECKIN_RUN) { const end = $.done.bind($); $.done = () => end({ response: { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: $.getdata('baidunetdisk_status') || '{}' } }); }
+
+const SCRIPT_VERSION = "2026-10-28.r4"; // 改一次 +1,确认拉到最新版
+$.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
+
+const CK_KEY    = 'baidunetdisk_data';
+const TRACK_KEY = 'baidunetdisk_track';   // 成长值基线 {value,ts},用真实变化算"约 N 天"
+const API       = 'https://pan.baidu.com';
+const COMMON  = 'app_id=250528&web=5';                       // 会员成长值(WAP)系统通用参数
+const REFERER = 'https://pan.baidu.com/wap/svip/growth/task';
+// 通用浏览器 UA(所有用户一致、无任何个人/设备痕迹;成长值是 WAP 系统,按浏览器身份请求)
+const UA = 'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 ' +
+           '(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+
+// 会员成长值 → SVIP 等级阈值(升级到 SVIPn 所需成长值,平台稳定配置;SVIP10 满级)
+const LEVEL_THRESHOLDS = {
+    2: 1000, 3: 3000, 4: 7000, 5: 15000, 6: 27000,
+    7: 43000, 8: 56000, 9: 68000, 10: 100000,
+};
+// 每日会员成长值(按购买的产品类型给,与等级无关;有效期内不衰减)→ 估算到 SVIP10 还要几天
+const DAILY_GROWTH = {
+    vip2_1m: 20, vip2_1m_auto: 20, vip2_1y: 30, vip2_1y_auto: 30,
+    vip2_3m: 20, vip2_3m_auto: 20, vip2_7d_1m_auto: 20, vip2_vipv2_upgrade_svip: 20,
+    vip1_1m: 5, vip1_1y: 12, vip1_3m: 10,
+};
+
+// ─── 入口 ────────────────────────────────────────────────────────────────────
+if (typeof $request !== "undefined" && !CHECKIN_RUN) {
+    getCookie();
+    $.done();
+} else {
+    (async () => {
+        if (JSON.parse($.getdata("baidunetdisk_clear") || "false")) {
+            $.setdata("", CK_KEY);
+            $.setdata("", TRACK_KEY);
+            $.setdata("false", "baidunetdisk_clear");
+            $.msg($.name, "", "✅ Cookie 已清除，请重新抓取");
+            return $.done();
+        }
+        try {
+            await main();
+        } catch (e) {
+            saveStatus('fail', String(e));
+            $.msg($.name, '❌ 运行异常', String(e));
+        } finally {
+            $.done();
+        }
+    })();
+}
+
+// ─── 抓 Cookie ───────────────────────────────────────────────────────────────
+// 触发条件: 打开网盘「我的 → 签到 / 会员」页,signinlist 请求带完整 Cookie(BDUSS/STOKEN)
+function getCookie() {
+    const cookie = normalizeCookie(headerVal('cookie'));
+    if (!cookie || !/BDUSS=/.test(cookie)) {
+        $.msg($.name, '⚠️ 未抓到有效 Cookie',
+            '请确认已开启 MITM 并打开网盘「我的 → 签到 / 会员」页');
+        return;
+    }
+    $.setdata(cookie, CK_KEY);
+    $.setdata('', 'baidunetdisk_status'); // 新 Cookie 待签到验证,先撤掉旧的体检结果
+    const uid = (cookie.match(/BDUSS=([^;]{0,8})/) || [])[1] || '';
+    $.msg($.name, '✅ 百度网盘 Cookie 获取成功', `BDUSS: ${uid}…`);
+}
+
+// ─── 签到主逻辑 ──────────────────────────────────────────────────────────────
+async function main() {
+    const cookie = $.getdata(CK_KEY);
+    if (!cookie) {
+        saveStatus('none', '未抓取 Cookie');
+        $.msg($.name, '🚫 缺少 Cookie',
+            '请先开启重写规则,打开网盘「我的 → 签到 / 会员」页面');
+        return;
+    }
+
+    // 1. 成长值签到
+    const signRes = await api(`/rest/2.0/membership/level?${COMMON}&method=signin`, cookie);
+    debug('[signin] ' + signRes.slice(0, 200));
+    if (!signRes) {
+        saveStatus('fail', '签到无响应');
+        $.msg($.name, '❌ 签到失败', '无响应\n(若 Cookie 失效,请重新打开网盘签到页抓取)');
+        return;
+    }
+    if (/("errno"|"error_code")\s*:\s*-?(6|2|110)\b/.test(signRes) || /not login|登录/.test(signRes)) {
+        saveStatus('cookie', '登录失效');
+        $.msg($.name, '🚫 登录失效', '请重新打开网盘「我的 → 签到 / 会员」页抓 Cookie');
+        return;
+    }
+    const signPts = num(signRes, /"points"\s*:\s*(\d+)/);     // 签到加的成长值
+    const signTip = signPts ? `签到 +${signPts}` : '签到已完成';
+
+    // 2. 每日答题(答案在取题响应里直接给,回填即可,额外加成长值)
+    let answerTip = '';
+    let answerPts = 0;
+    try {
+        const q = await api(`/act/v2/membergrowv2/getdailyquestion?${COMMON}`, cookie);
+        const askId  = num(q, /"ask_id"\s*:\s*(\d+)/);
+        const answer = num(q, /"answer"\s*:\s*(\d+)/);
+        if (askId && answer != null) {
+            const a = await api(`/act/v2/membergrowv2/answerquestion?${COMMON}&ask_id=${askId}&answer=${answer}`, cookie);
+            debug('[answer] ' + a.slice(0, 200));
+            answerPts = num(a, /"score"\s*:\s*(\d+)/) || 0;
+            answerTip = answerPts ? ` · 答题 +${answerPts}` : ' · 答题已完成';
+        } else {
+            answerTip = ' · 答题已完成';   // 今日无题 / 已答
+        }
+    } catch (e) {
+        debug('答题阶段异常,忽略: ' + e);
+    }
+
+    // 3. 查会员成长值 / 等级 → 距 SVIP10 进度
+    const tail = await growthTail(cookie, (signPts || 0) + answerPts);
+
+    saveStatus('ok', `${signTip}${answerTip}`, $.growth != null ? `成长值 ${$.growth}` : undefined);
+    $.msg($.name, '✅ 百度网盘成长值签到', `${signTip}${answerTip}${tail}`);
+}
+
+// 记录本次结果,供「签到汇总」:ok 正常 / cookie 需重新抓取 / fail 其他失败 / none 未使用
+function saveStatus(s, msg, asset) {
+    msg = String(msg).slice(0, 100);
+    // 服务器明确提示登录过期的失败,按需要重新抓取处理
+    if (s === 'fail' && /过期|重新登录|未登录|请登录|登录失效|登录已失效|token\s*(失效|过期|无效)|not\s*login/i.test(msg)) s = 'cookie';
+    // 同一天已有带奖励的成功记录时,再次运行得到的「今日已签」不覆盖它的奖励文字,只合并本次的资产等信息
+    let keep = null;
+    if (s === 'ok' && /^今日已/.test(msg)) {
+        const day = (t) => new Date(t + 8 * 3600 * 1000).toISOString().slice(0, 10);
+        let old = null;
+        try { old = JSON.parse($.getdata('baidunetdisk_status') || 'null'); } catch (e) {}
+        if (old && old.s === 'ok' && !/^今日已/.test(old.msg) && day(old.t) === day(Date.now())) keep = old;
+    }
+    checkinReport('baidunetdisk_status', keep ? keepReward(keep, { s, msg, asset }) : { s, msg, asset }, { name: '百度网盘', author: 'MaYIHEI', run: 'http://1.1.1.1/checkin/baidunetdisk', open: 'https://apps.apple.com/app/id547166701' });
+}
+
+// 拼「会员成长值 / 等级 / 距下一级 + 估算天数」尾巴(失败不影响主结果)
+async function growthTail(cookie, todayGain) {
+    try {
+        const u = await api(`/rest/2.0/membership/user?${COMMON}&method=query`, cookie);
+        const L = num(u, /"current_level"\s*:\s*(\d+)/);
+        const V = num(u, /"current_value"\s*:\s*(\d+)/);
+        if (L == null || V == null) return '';
+        $.growth = V;
+        let t = ` · SVIP${L} 成长值 ${V}`;
+        const next = LEVEL_THRESHOLDS[L + 1];
+        if (next != null) {
+            const gap = next - V;
+            t += ` · 距 SVIP${L + 1} 还差 ${gap}`;
+            const perDay = dailyRate(V, str(u, /"product_type"\s*:\s*"(.*?)"/), todayGain);
+            if (perDay > 0 && gap > 0) t += `(约 ${Math.ceil(gap / perDay)} 天)`;
+        } else {
+            t += ' · 已满级';
+        }
+        return t;
+    } catch (e) {
+        debug('查成长值异常,忽略: ' + e);
+        return '';
+    }
+}
+
+// 每日成长速率:优先用「成长值真实变化 ÷ 经过天数」(涵盖 app+web+答题+会员所有来源);
+// 首次跑没基线、或同日重跑(不足 ~1 天)时,退回「会员每日 + 今日所得」估算
+function dailyRate(V, ptype, todayGain) {
+    const now = Date.now();
+    try {
+        const tk = JSON.parse($.getdata(TRACK_KEY) || 'null');
+        if (tk && tk.value != null && tk.ts) {
+            const days = (now - tk.ts) / 86400000;
+            if (days >= 0.8 && V > tk.value) return (V - tk.value) / days;   // 实测日均
+        } else {
+            $.setdata(JSON.stringify({ value: V, ts: now }), TRACK_KEY);     // 建立基线
+        }
+    } catch (e) {
+        debug('成长值基线读写异常: ' + e);
+    }
+    return (DAILY_GROWTH[ptype] || 0) + (todayGain || 0);                    // 兜底估算
+}
+
+// ─── 调一次 pan.baidu.com 接口(GET,鉴权靠 Cookie),返回原始文本 ─────────────
+function api(path, cookie) {
+    return new Promise((resolve) => {
+        const opts = {
+            url: `${API}${path}`,
+            headers: {
+                'Host':             'pan.baidu.com',
+                'Accept':           'application/json, text/plain, */*',
+                'Accept-Language':  'zh-CN,zh-Hans;q=0.9',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer':          REFERER,
+                'User-Agent':       UA,
+                'Cookie':           cookie,
+            },
+            timeout: 10000,
+        };
+        $.get(opts, (err, _resp, data) => {
+            if (err) { debug(`[api ${path}] 错误: ${JSON.stringify(err)}`); resolve(''); return; }
+            resolve(String(data || ''));
+        });
+    });
+}
+
+// ─── 工具函数 ─────────────────────────────────────────────────────────────────
+function num(s, re) { const m = re.exec(s); return m ? parseInt(m[1], 10) : null; }
+function str(s, re) { const m = re.exec(s); return m ? m[1] : ''; }
+
+// 取请求头(大小写不敏感)
+function headerVal(name) {
+    const h = $request.headers || {};
+    const low = name.toLowerCase();
+    for (const k in h) if (k.toLowerCase() === low) return h[k];
+    return '';
+}
+
+// HTTP/2 下多 cookie 头被合并时可能残留换行 + 重复 "cookie:" 前缀,清掉
+function normalizeCookie(s) {
+    return String(s || '')
+        .replace(/\r?\n\s*cookie:\s*/gi, '; ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+// 调试日志:BoxJS 设 baidunetdisk_debug=true 才打印接口原始响应
+function debug(content) {
+    if (($.getdata("baidunetdisk_debug") || "false") !== "true") return;
+    $.log(`[DEBUG] ${typeof content === "string" ? content : JSON.stringify(content)}`);
+}
+
+// 保留当天带奖励的旧记录(状态、奖励文字、时间),合并本次拿到的资产、过期时间等;本次没有的沿用旧值
+function keepReward(old, rec) {
+    const out = { s: old.s, msg: old.msg, t: old.t, asset: old.asset, exp: old.exp };
+    for (const k in rec) if (rec[k] !== undefined && k !== 's' && k !== 'msg') out[k] = rec[k];
+    return out;
+}
+
+// 签到状态协议 v1:写本次结果,并把自己登记进公共索引 checkin_registry(Loon/Surge/QX/Stash 通用,不依赖 Env)
+function checkinReport(key, rec, info) {
+    const read = (k) => (typeof $prefs !== 'undefined' ? $prefs.valueForKey(k) : $persistentStore.read(k));
+    const write = (v, k) => (typeof $prefs !== 'undefined' ? $prefs.setValueForKey(v, k) : $persistentStore.write(v, k));
+    const registry = () => { try { return JSON.parse(read('checkin_registry') || '{}') || {}; } catch (e) { return {}; } };
+    write(JSON.stringify(Object.assign({ v: 1, t: Date.now(), name: info.name, author: info.author }, rec)), key);
+    const reg = registry();
+    if (JSON.stringify(reg[key]) === JSON.stringify(info)) return;
+    reg[key] = info;
+    write(JSON.stringify(reg), 'checkin_registry');
+    if (!registry()[key]) console.log(`[checkin] ${key} 登记没写上,下次运行再补`);
+}
+
+// @Chavy Env
+function Env(s) {
+    this.name = s;
+    this.isSurge = () => typeof $httpClient !== 'undefined';
+    this.isQuanX = () => typeof $task !== 'undefined';
+    this.isLoon  = () => typeof $loon !== 'undefined';
+    this.log = (...a) => console.log(a.join('\n'));
+    this.msg = (t = this.name, s = '', b = '') => {
+        if (this.isSurge() || this.isLoon()) $notification.post(t, s, b);
+        else if (this.isQuanX()) $notify(t, s, b);
+        console.log(['', '====📣' + t + '====', s, b].filter(Boolean).join('\n'));
+    };
+    this.getdata = (k) => {
+        if (this.isSurge() || this.isLoon()) return $persistentStore.read(k);
+        if (this.isQuanX()) return $prefs.valueForKey(k);
+        return null;
+    };
+    this.setdata = (v, k) => {
+        if (this.isSurge() || this.isLoon()) return $persistentStore.write(v, k);
+        if (this.isQuanX()) return $prefs.setValueForKey(v, k);
+        return false;
+    };
+    this.get  = (req, cb) => this.send(req, 'GET',  cb);
+    this.post = (req, cb) => this.send(req, 'POST', cb);
+    this.send = (req, method, cb) => {
+        if (this.isSurge() || this.isLoon()) {
+            const fn = method === 'POST' ? $httpClient.post : $httpClient.get;
+            fn(req, (err, resp, data) => {
+                if (resp) { resp.body = data; resp.statusCode = resp.status || resp.statusCode; }
+                cb(err, resp, data);
+            });
+        } else if (this.isQuanX()) {
+            req.method = method;
+            $task.fetch(req).then(
+                (r) => { r.status = r.statusCode; cb(null, r, r.body); },
+                (e) => cb(e.error || e, null, null)
+            );
+        }
+    };
+    this.done = (v = {}) => { if (typeof $done !== 'undefined') $done(v); };
+}
+
+
+  // ---------- 等待上游收尾 ----------
+  await __donePromise;
+  return {};
+}

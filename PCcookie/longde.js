@@ -1,0 +1,491 @@
+// longde · Cookie 抓取（Egern 移植版）
+// 原作: MaYIHEI
+// 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/longde/longde.js
+// 上游更新日期: 2026-10-28
+// 移植说明: 上游脚本逻辑原样保留，仅在外层把 Surge 环境 API 桥接到 Egern ctx。
+export default async function (ctx) {
+  if (String(ctx.request.headers.get('referer') || '').includes('wx1b1dda695dff82c8')) return {};
+
+  // ---------- 环境桥 ----------
+  let __request, __response;
+  if (ctx.request) {
+    const __headers = {};
+    const __names = new Set(["cookie", "user-agent", "referer", "content-type", "host", "accept", "accept-language", "x-lf-channel", "authorization", "token"]);
+    try { if (typeof ctx.request.headers.forEach === "function") ctx.request.headers.forEach((v, k) => __names.add(String(k).toLowerCase())); } catch (e) {}
+    for (const __n of __names) {
+      try {
+        const __all = typeof ctx.request.headers.getAll === "function" ? ctx.request.headers.getAll(__n) : null;
+        if (__all && __all.length > 1) __headers[__n] = __all;
+        else { const __v = ctx.request.headers.get(__n); if (__v != null) __headers[__n] = __v; }
+      } catch (e) {}
+    }
+    let __body = "";
+    try { __body = await ctx.request.text(); } catch (e) {}
+    __request = { url: ctx.request.url, method: ctx.request.method, headers: __headers, body: __body };
+  }
+  if (ctx.response) {
+    const __rh = {};
+    try { if (typeof ctx.response.headers.forEach === "function") ctx.response.headers.forEach((v, k) => { __rh[String(k).toLowerCase()] = v; }); } catch (e) {}
+    let __rbody = "";
+    try { __rbody = await ctx.response.text(); } catch (e) {}
+    __response = { status: ctx.response.status, statusCode: ctx.response.status, headers: __rh, body: __rbody };
+  }
+  const __mk = (method) => (opts, cb) => {
+    (async () => {
+      try {
+        const __o = typeof opts === "string" ? { url: opts } : (opts || {});
+        const __init = { headers: __o.headers || {}, timeout: __o.timeout };
+        let __resp;
+        if (method === "GET") __resp = await ctx.http.get(__o.url, __init);
+        else if (method === "POST") __resp = await ctx.http.post(__o.url, { ...__init, body: __o.body });
+        else if (method === "PUT") __resp = await ctx.http.put(__o.url, { ...__init, body: __o.body });
+        else if (method === "DELETE") __resp = await ctx.http.delete(__o.url, __init);
+        else if (method === "PATCH") __resp = await ctx.http.patch(__o.url, { ...__init, body: __o.body });
+        else if (method === "HEAD") __resp = await ctx.http.head(__o.url, __init);
+        else __resp = await ctx.http.options(__o.url, __init);
+        const __text = await __resp.text();
+        const __hh = {};
+        try { if (__resp.headers && typeof __resp.headers.forEach === "function") __resp.headers.forEach((v, k) => { __hh[k] = v; }); } catch (e) {}
+        const __r = { status: __resp.status, statusCode: __resp.status, headers: __hh, body: __text };
+        cb(null, __r, __text);
+      } catch (e) {
+        cb(e && e.message ? e.message : String(e), null, null);
+      }
+    })();
+  };
+  globalThis.$httpClient = { get: __mk("GET"), post: __mk("POST"), put: __mk("PUT"), delete: __mk("DELETE"), head: __mk("HEAD"), options: __mk("OPTIONS"), patch: __mk("PATCH") };
+  globalThis.$persistentStore = {
+    read: (k) => { try { const v = ctx.storage.get(k); return v == null ? null : v; } catch (e) { return null; } },
+    write: (v, k) => { try { ctx.storage.set(k, v == null ? "" : String(v)); return true; } catch (e) { return false; } },
+  };
+  globalThis.$notification = { post: (t, s, b) => { try { ctx.notify({ title: t == null ? "" : String(t), subtitle: s ? String(s) : undefined, body: b == null ? "" : String(b) }); } catch (e) {} } };
+  globalThis.$environment = { "surge-version": "5.20.0" };
+  globalThis.$argument = {};
+  globalThis.$request = __request;
+  globalThis.$response = __response;
+  let __finish;
+  const __donePromise = new Promise((r) => { __finish = r; });
+  globalThis.$done = () => { try { __finish(); } catch (e) {} };
+
+  // ---------- 上游脚本（原样） ----------
+const $ = new Env("龙德广场");
+
+// 签到合集开启「统一通知」时不单独弹通知,结果由签到汇总统一发送
+$.merge = typeof $argument === "object" && !!$argument && $argument.merge === true;
+if ($.merge) $.msg = (...a) => console.log(a.filter((x) => typeof x === "string" && x).join("\n"));
+
+// 补签入口:请求 http://1.1.1.1/checkin/longde 时现跑一次签到,跑完把本脚本的签到状态作为响应返回
+const CHECKIN_RUN = typeof $request !== "undefined" && /^http:\/\/1\.1\.1\.1\/checkin\//.test($request.url);
+if (CHECKIN_RUN) { const end = $.done.bind($); $.done = () => end({ response: { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" }, body: $.getdata("longde_status") || "{}" } }); }
+
+const SCRIPT_VERSION = "2026-10-28.r4"; // 改一次 +1,确认拉到最新版
+$.log(`[INFO] 脚本版本 ${SCRIPT_VERSION}`);
+const CK_NAME = "longde_token";
+$.token = ($.isNode() ? process.env.LONGDE_TOKEN : $.getdata(CK_NAME)) || "";
+$.is_debug = ($.isNode() ? process.env.IS_DEBUG : $.getdata("is_debug")) || "false";
+$.messages = [];
+
+const HOST = "https://a.china-smartech.com";
+const VERSION = "v2.7.24t4livepoint";
+
+// ============ 签名 (HmacSHA256, key = JWT) ============
+
+function genNonce(len = 10) {
+    const charset = "ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz0123456789";
+    let s = "";
+    for (let i = 0; i < len; i++) s += charset.charAt(Math.floor(Math.random() * charset.length));
+    return s;
+}
+
+// 来自小程序 utils/signature.js 的 hashResult:
+//   payload = url(未编码) + JSON.stringify(body)("{}" if 无 body) + timestamp + nonce
+//   key     = wx.getStorageSync("access_token") (= 完整 JWT)
+//   sig     = HmacSHA256(payload, key)
+function sign(path, body, token) {
+    let a;
+    try {
+        a = body === undefined || body === null ? "{}" : JSON.stringify(body);
+    } catch (e) {
+        a = "{}";
+    }
+    if (a === undefined) a = "{}";
+    const c = Math.floor(Date.now() / 1000).toString();
+    const s = genNonce(10);
+    const u = path + a + c + s;
+    const i = hmacSHA256Hex(u, token);
+    return {
+        "X-ZHIMA-VERSION": VERSION,
+        "X-ZHIMA-TIMESTAMP": c,
+        "X-ZHIMA-NONCE": s,
+        "X-ZHIMA-SIGNATURE": i,
+        "X-ZHIMA-URL": encodeURIComponent(path),
+    };
+}
+
+// ============ JWT ============
+
+function parseJWT(token) {
+    try {
+        const parts = token.split(".");
+        if (parts.length !== 3) return null;
+        let p = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        while (p.length % 4) p += "=";
+        let decoded;
+        if (typeof Buffer !== "undefined") {
+            decoded = Buffer.from(p, "base64").toString("utf-8");
+        } else {
+            decoded = decodeURIComponent(escape(atob(p)));
+        }
+        return JSON.parse(decoded);
+    } catch (e) {
+        return null;
+    }
+}
+
+// ============ 业务 ============
+
+// 会员积分余额(和北京华联同一套 member.info 接口,余额优先 data.balance,否则 data.point);查不到就不写
+async function pointAsset(mallId, memberId) {
+    if (!memberId) return undefined;
+    const res = await request("GET", `restful/mall/${mallId}/member/${memberId}`, null);
+    debug(res, "member.info");
+    const d = res && res.data;
+    const point = d && (typeof d.balance === "number" ? d.balance : typeof d.point === "number" ? d.point : null);
+    return point != null ? `积分 ${point}` : undefined;
+}
+
+async function checkin() {
+    const payload = parseJWT($.token);
+    if (!payload || !payload.mall_id) {
+        saveStatus("cookie", "Cookie 解析失败");
+        throw new Error("JWT 解析失败,请重新抓取 token");
+    }
+    const mallId = payload.mall_id;
+    $.log(`[INFO] mall_id=${mallId} user_id=${payload.sub}`);
+
+    // 查签到状态(可选,提供丰富通知信息;签名可能因 mgms 不完全匹配,但接口宽容)
+    const formPath = `restful/mall/${mallId}/checkInForm?with_records=1`;
+    const formRes = await request("GET", formPath, null);
+    debug(formRes, "checkInForm");
+
+    if (formRes && formRes.code === 401) {
+        saveStatus("cookie", `token 已失效: ${formRes.msg || ""}`);
+        throw new Error(`token 已失效: ${formRes.msg || ""}`);
+    }
+
+    // 签到
+    const checkinPath = `restful/mall/${mallId}/checkInRecord`;
+    const checkinBody = { latitude: 0, longitude: 0 };
+    const res = await request("POST", checkinPath, checkinBody);
+    debug(res, "checkInRecord");
+
+    if (!res) {
+        saveStatus("fail", "签到无响应");
+        $.messages.push("❌ 签到失败: 无响应");
+        return;
+    }
+
+    // 成功
+    if (res.code === 200 && res.data) {
+        const { point, point_total, total_point, extra, num } = res.data;
+        const earned = point_total || point || 0;
+        const extraLine = extra && extra > 0 ? ` (含连签 +${extra})` : "";
+        const totalLine = typeof total_point === "number" ? `, 累计 ${total_point} 分` : "";
+        const numLine = typeof num === "number" ? `\n📅 本月已签 ${num} 天` : "";
+        saveStatus("ok", `签到成功 +${earned} 分`, await pointAsset(mallId, payload.sub));
+        $.messages.push(`✅ 签到成功: +${earned} 分${extraLine}${totalLine}${numLine}`);
+        return;
+    }
+
+    // 已签
+    if (res.code === 422 || /已签|已经签到/.test(res.msg || "")) {
+        saveStatus("ok", "今日已签到", await pointAsset(mallId, payload.sub));
+        $.messages.push(`✨ 今日已签到${res.msg ? `: ${res.msg}` : ""}`);
+        return;
+    }
+
+    // 401 / token 问题
+    if (res.code === 401) {
+        saveStatus("cookie", `token 失效: ${res.msg || ""}`);
+        $.messages.push(`❌ token 失效: ${res.msg || ""}`);
+        return;
+    }
+
+    saveStatus("fail", `code=${res.code} ${res.msg || $.toStr(res)}`);
+    $.messages.push(`❌ 签到失败: code=${res.code} msg=${res.msg || $.toStr(res)}`);
+}
+
+// ============ 请求 ============
+
+// 记录本次结果,供「签到汇总」:ok 正常 / cookie 需重新抓取 / fail 其他失败 / none 未使用
+function saveStatus(s, msg, asset) {
+    msg = String(msg).slice(0, 100);
+    // 服务器明确提示登录过期的失败,按需要重新抓取处理
+    if (s === "fail" && /过期|重新登录|未登录|请登录|登录失效|登录已失效|token\s*(失效|过期|无效)|not\s*login/i.test(msg)) s = "cookie";
+    // 同一天已有带奖励的成功记录时,再次运行得到的「今日已签」不覆盖它的奖励文字,只合并本次的资产等信息
+    let keep = null;
+    if (s === "ok" && /^今日已/.test(msg)) {
+        const day = (t) => new Date(t + 8 * 3600 * 1000).toISOString().slice(0, 10);
+        let old = null;
+        try { old = JSON.parse($.getdata("longde_status") || "null"); } catch (e) {}
+        if (old && old.s === "ok" && !/^今日已/.test(old.msg) && day(old.t) === day(Date.now())) keep = old;
+    }
+    checkinReport("longde_status", keep ? keepReward(keep, { s, msg, asset, exp: cookieExp() }) : { s, msg, asset, exp: cookieExp() }, { name: "龙德广场", author: "MaYIHEI", run: "http://1.1.1.1/checkin/longde", open: "weixin://" });
+}
+
+function request(method, path, body) {
+    return new Promise((resolve) => {
+        const headers = {
+            "Accept": "application/json",
+            "content-type": "application/json",
+            "Authorization": `Bearer ${$.token}`,
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 26_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 MicroMessenger/8.0.73(0x18004931) NetType/WIFI Language/zh_CN",
+            "Referer": "https://servicewechat.com/wxbed463d49f94aaf3/197/page-frame.html",
+        };
+        Object.assign(headers, sign(path, body, $.token));
+
+        const opts = { url: `${HOST}/${path}`, headers };
+        if (method === "POST" && body) opts.body = JSON.stringify(body);
+
+        debug({ url: opts.url, headers, body: opts.body }, `${method} request`);
+
+        const fn = method === "POST" ? $.post : $.get;
+        fn.call($, opts, (err, resp, data) => {
+            if (err) {
+                $.log(`[ERROR] ${method} ${path}: ${$.toStr(err)}`);
+                resolve(null);
+                return;
+            }
+            try {
+                resolve(typeof data === "string" ? JSON.parse(data) : data);
+            } catch (e) {
+                $.log(`[ERROR] 响应解析失败: ${(data || "").substring(0, 300)}`);
+                resolve(null);
+            }
+        });
+    });
+}
+
+// ============ Cookie 抓取 ============
+
+function getCookie() {
+    try {
+        const headers = ObjectKeys2LowerCase($request.headers);
+        const auth = headers["authorization"] || "";
+        const newToken = auth.replace(/^Bearer\s+/i, "").trim();
+        if (!newToken) {
+            $.log("[WARN] 未抓到 Authorization 头");
+            return;
+        }
+        const payload = parseJWT(newToken);
+        if (!payload || !payload.mall_id) {
+            $.log("[WARN] JWT 解析失败,放弃保存");
+            return;
+        }
+        if (newToken === $.token) {
+            $.log("[INFO] token 未变化");
+            return;
+        }
+        $.setdata(newToken, CK_NAME);
+        $.setdata("", "longde_status"); // 新 Cookie 待签到验证,先撤掉旧的体检结果
+        const expDate = payload.exp ? new Date(payload.exp * 1000).toLocaleDateString() : "?";
+        $.msg($.name, "✅ 龙德广场 Cookie 获取成功", `mall_id: ${payload.mall_id}\n有效至: ${expDate}`);
+    } catch (e) {
+        $.log(`[ERROR] cookie 抓取异常: ${e}`);
+    }
+}
+
+// ============ 工具 ============
+
+function ObjectKeys2LowerCase(obj) {
+    if (!obj) return {};
+    return Object.fromEntries(Object.entries(obj).map(([k, v]) => [k.toLowerCase(), v]));
+}
+
+function debug(content, title = "debug") {
+    if ($.is_debug !== "true") return;
+    $.log(`\n----- ${title} -----`);
+    $.log(typeof content === "string" ? content : $.toStr(content));
+    $.log(`----- end -----\n`);
+}
+
+async function sendMsg(message) {
+    if (!message) return;
+    if ($.isNode()) {
+        try {
+            const notify = require("./sendNotify");
+            await notify.sendNotify($.name, message);
+        } catch (e) {
+            $.log(`\n${$.name}\n${message}`);
+        }
+    } else {
+        $.msg($.name, "", message);
+    }
+}
+
+// ============ HmacSHA256 (纯 JS, 无依赖) ============
+//
+// SHA256 实现基于 https://github.com/jbt/js-crypto (公共领域 / WTFPL),
+// 紧凑实测正确。HMAC 按 RFC 2104 包装。已通过对比 Node crypto 验证。
+
+function _sha256_latin1(ascii) {
+    function rightRotate(value, amount) {
+        return (value >>> amount) | (value << (32 - amount));
+    }
+    const mathPow = Math.pow;
+    const maxWord = mathPow(2, 32);
+    let result = "";
+    const words = [];
+    const asciiBitLength = ascii.length * 8;
+    let hash = _sha256_latin1.h = _sha256_latin1.h || [];
+    const k = _sha256_latin1.k = _sha256_latin1.k || [];
+    let primeCounter = k.length;
+    const isComposite = {};
+    for (let candidate = 2; primeCounter < 64; candidate++) {
+        if (!isComposite[candidate]) {
+            for (let i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+            hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
+            k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+        }
+    }
+    hash = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    ascii += "\x80";
+    while (ascii.length % 64 - 56) ascii += "\x00";
+    for (let i = 0; i < ascii.length; i++) {
+        const j = ascii.charCodeAt(i);
+        if (j >> 8) return; // 调用方必须先做 utf-8 编码
+        words[i >> 2] |= j << ((3 - i) % 4) * 8;
+    }
+    words[words.length] = ((asciiBitLength / maxWord) | 0);
+    words[words.length] = asciiBitLength;
+    for (let j = 0; j < words.length;) {
+        const w = words.slice(j, j += 16);
+        const oldHash = hash.slice(0);
+        for (let i = 0; i < 64; i++) {
+            const w15 = w[i - 15], w2 = w[i - 2];
+            const a = hash[0], e = hash[4];
+            const temp1 = hash[7]
+                + (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25))
+                + ((e & hash[5]) ^ ((~e) & hash[6]))
+                + k[i]
+                + (w[i] = (i < 16) ? w[i] : (
+                    w[i - 16]
+                    + (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3))
+                    + w[i - 7]
+                    + (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))
+                  ) | 0);
+            const temp2 = (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22))
+                + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+            hash = [(temp1 + temp2) | 0].concat(hash);
+            hash[4] = (hash[4] + temp1) | 0;
+        }
+        for (let i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+    }
+    for (let i = 0; i < 8; i++) {
+        for (let j = 3; j + 1; j--) {
+            const b = (hash[i] >> (j * 8)) & 255;
+            result += ((b < 16) ? "0" : "") + b.toString(16);
+        }
+    }
+    return result;
+}
+
+function _utf8ToLatin1(s) {
+    // 把 utf-8 字符串编码为 latin1 字节流字符串
+    return unescape(encodeURIComponent(s));
+}
+
+function _sha256BinFromLatin1(latin1) {
+    const hex = _sha256_latin1(latin1);
+    let s = "";
+    for (let i = 0; i < hex.length; i += 2) {
+        s += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+    }
+    return s;
+}
+
+function hmacSHA256Hex(message, key) {
+    const blockSize = 64;
+    let kBin = _utf8ToLatin1(key);
+    if (kBin.length > blockSize) kBin = _sha256BinFromLatin1(kBin);
+    while (kBin.length < blockSize) kBin += "\x00";
+    let opad = "", ipad = "";
+    for (let i = 0; i < blockSize; i++) {
+        opad += String.fromCharCode(kBin.charCodeAt(i) ^ 0x5c);
+        ipad += String.fromCharCode(kBin.charCodeAt(i) ^ 0x36);
+    }
+    const inner = _sha256BinFromLatin1(ipad + _utf8ToLatin1(message));
+    return _sha256_latin1(opad + inner);
+}
+
+// ============ 入口 ============
+
+if (typeof $request !== "undefined" && !CHECKIN_RUN) {
+    getCookie();
+    $.done();
+} else {
+    (async () => {
+        if (JSON.parse($.getdata("longde_clear") || "false")) {
+            $.setdata("", CK_NAME);
+            $.setdata("false", "longde_clear");
+            $.messages.push("✅ Cookie 已清除，请重新抓取");
+            return;
+        }
+        if (!$.token) {
+            saveStatus("none", "未抓取 Cookie");
+            throw new Error("未配置 token,请先进小程序'签到'页抓取");
+        }
+        const payload = parseJWT($.token);
+        if (payload && payload.exp && payload.exp * 1000 < Date.now()) {
+            saveStatus("cookie", "token 已过期");
+            throw new Error("token 已过期,请重新抓取");
+        }
+        await checkin();
+    })()
+        .catch((e) => {
+            $.messages.push(e.message || String(e));
+            $.logErr(e);
+        })
+        .finally(async () => {
+            await sendMsg($.messages.join("\n"));
+            $.done();
+        });
+}
+
+// Cookie(token 是 JWT)的过期时间,毫秒;JWT 里没有 exp 就不写
+function cookieExp() {
+    const p = parseJWT($.token || "");
+    return p && typeof p.exp === "number" ? p.exp * 1000 : undefined;
+}
+
+// 保留当天带奖励的旧记录(状态、奖励文字、时间),合并本次拿到的资产、过期时间等;本次没有的沿用旧值
+function keepReward(old, rec) {
+    const out = { s: old.s, msg: old.msg, t: old.t, asset: old.asset, exp: old.exp };
+    for (const k in rec) if (rec[k] !== undefined && k !== "s" && k !== "msg") out[k] = rec[k];
+    return out;
+}
+
+// 签到状态协议 v1:写本次结果,并把自己登记进公共索引 checkin_registry(Loon/Surge/QX/Stash 通用,不依赖 Env)
+function checkinReport(key, rec, info) {
+    const read = (k) => (typeof $prefs !== "undefined" ? $prefs.valueForKey(k) : $persistentStore.read(k));
+    const write = (v, k) => (typeof $prefs !== "undefined" ? $prefs.setValueForKey(v, k) : $persistentStore.write(v, k));
+    const registry = () => { try { return JSON.parse(read("checkin_registry") || "{}") || {}; } catch (e) { return {}; } };
+    write(JSON.stringify(Object.assign({ v: 1, t: Date.now(), name: info.name, author: info.author }, rec)), key);
+    const reg = registry();
+    if (JSON.stringify(reg[key]) === JSON.stringify(info)) return;
+    reg[key] = info;
+    write(JSON.stringify(reg), "checkin_registry");
+    if (!registry()[key]) console.log(`[checkin] ${key} 登记没写上,下次运行再补`);
+}
+
+// prettier-ignore
+function Env(t,e){class s{constructor(t){this.env=t}send(t,e="GET"){t="string"==typeof t?{url:t}:t;let s=this.get;return"POST"===e&&(s=this.post),new Promise((e,a)=>{s.call(this,t,(t,s,r)=>{t?a(t):e(s)})})}get(t){return this.send.call(this.env,t)}post(t){return this.send.call(this.env,t,"POST")}}return new class{constructor(t,e){this.name=t,this.http=new s(this),this.data=null,this.dataFile="box.dat",this.logs=[],this.isMute=!1,this.isNeedRewrite=!1,this.logSeparator="\n",this.encoding="utf-8",this.startTime=(new Date).getTime(),Object.assign(this,e),this.log("",`🔔${this.name}, 开始!`)}getEnv(){return"undefined"!=typeof $environment&&$environment["surge-version"]?"Surge":"undefined"!=typeof $environment&&$environment["stash-version"]?"Stash":"undefined"!=typeof module&&module.exports?"Node.js":"undefined"!=typeof $task?"Quantumult X":"undefined"!=typeof $loon?"Loon":"undefined"!=typeof $rocket?"Shadowrocket":void 0}isNode(){return"Node.js"===this.getEnv()}isQuanX(){return"Quantumult X"===this.getEnv()}isSurge(){return"Surge"===this.getEnv()}isLoon(){return"Loon"===this.getEnv()}isShadowrocket(){return"Shadowrocket"===this.getEnv()}isStash(){return"Stash"===this.getEnv()}toObj(t,e=null){try{return JSON.parse(t)}catch{return e}}toStr(t,e=null){try{return JSON.stringify(t)}catch{return e}}getjson(t,e){let s=e;const a=this.getdata(t);if(a)try{s=JSON.parse(this.getdata(t))}catch{}return s}setjson(t,e){try{return this.setdata(JSON.stringify(t),e)}catch{return!1}}getScript(t){return new Promise(e=>{this.get({url:t},(t,s,a)=>e(a))})}loaddata(){if(!this.isNode())return{};{this.fs=this.fs?this.fs:require("fs"),this.path=this.path?this.path:require("path");const t=this.path.resolve(this.dataFile),e=this.path.resolve(process.cwd(),this.dataFile),s=this.fs.existsSync(t),a=!s&&this.fs.existsSync(e);if(!s&&!a)return{};{const a=s?t:e;try{return JSON.parse(this.fs.readFileSync(a))}catch(t){return{}}}}}writedata(){if(this.isNode()){this.fs=this.fs?this.fs:require("fs"),this.path=this.path?this.path:require("path");const t=this.path.resolve(this.dataFile),e=this.path.resolve(process.cwd(),this.dataFile),s=this.fs.existsSync(t),a=!s&&this.fs.existsSync(e),r=JSON.stringify(this.data);s?this.fs.writeFileSync(t,r):a?this.fs.writeFileSync(e,r):this.fs.writeFileSync(t,r)}}getdata(t){return this.getval(t)}setdata(t,e){return this.setval(t,e)}getval(t){switch(this.getEnv()){case"Surge":case"Loon":case"Stash":case"Shadowrocket":return $persistentStore.read(t);case"Quantumult X":return $prefs.valueForKey(t);case"Node.js":return this.data=this.loaddata(),this.data[t];default:return this.data&&this.data[t]||null}}setval(t,e){switch(this.getEnv()){case"Surge":case"Loon":case"Stash":case"Shadowrocket":return $persistentStore.write(t,e);case"Quantumult X":return $prefs.setValueForKey(t,e);case"Node.js":return this.data=this.loaddata(),this.data[e]=t,this.writedata(),!0;default:return this.data&&this.data[e]||null}}initGotEnv(t){this.got=this.got?this.got:require("got"),this.cktough=this.cktough?this.cktough:require("tough-cookie"),this.ckjar=this.ckjar?this.ckjar:new this.cktough.CookieJar,t&&(t.headers=t.headers?t.headers:{},void 0===t.headers.Cookie&&void 0===t.cookieJar&&(t.cookieJar=this.ckjar))}get(t,e=(()=>{})){switch(t.headers&&(delete t.headers["Content-Type"],delete t.headers["Content-Length"],delete t.headers["content-type"],delete t.headers["content-length"]),t.params&&(t.url+="?"+this.queryStr(t.params)),this.getEnv()){case"Surge":case"Loon":case"Stash":case"Shadowrocket":default:this.isSurge()&&this.isNeedRewrite&&(t.headers=t.headers||{},Object.assign(t.headers,{"X-Surge-Skip-Scripting":!1})),$httpClient.get(t,(t,s,a)=>{!t&&s&&(s.body=a,s.statusCode=s.status?s.status:s.statusCode,s.status=s.statusCode),e(t,s,a)});break;case"Quantumult X":this.isNeedRewrite&&(t.opts=t.opts||{},Object.assign(t.opts,{hints:!1})),$task.fetch(t).then(t=>{const{statusCode:s,statusCode:a,headers:r,body:i,bodyBytes:o}=t;e(null,{status:s,statusCode:a,headers:r,body:i,bodyBytes:o},i,o)},t=>e(t&&t.error||"UndefinedError"));break;case"Node.js":let s=require("iconv-lite");this.initGotEnv(t),this.got(t).on("redirect",(t,e)=>{try{if(t.headers["set-cookie"]){const s=t.headers["set-cookie"].map(this.cktough.Cookie.parse).toString();s&&this.ckjar.setCookieSync(s,null),e.cookieJar=this.ckjar}}catch(t){this.logErr(t)}}).then(t=>{const{statusCode:a,statusCode:r,headers:i,rawBody:o}=t,n=s.decode(o,this.encoding);e(null,{status:a,statusCode:r,headers:i,rawBody:o,body:n},n)},t=>{const{message:a,response:r}=t;e(a,r,r&&s.decode(r.rawBody,this.encoding))})}}post(t,e=(()=>{})){const s=t.method?t.method.toLocaleLowerCase():"post";switch(t.body&&t.headers&&!t.headers["Content-Type"]&&!t.headers["content-type"]&&(t.headers["content-type"]="application/x-www-form-urlencoded"),t.headers&&(delete t.headers["Content-Length"],delete t.headers["content-length"]),this.getEnv()){case"Surge":case"Loon":case"Stash":case"Shadowrocket":default:this.isSurge()&&this.isNeedRewrite&&(t.headers=t.headers||{},Object.assign(t.headers,{"X-Surge-Skip-Scripting":!1})),$httpClient[s](t,(t,s,a)=>{!t&&s&&(s.body=a,s.statusCode=s.status?s.status:s.statusCode,s.status=s.statusCode),e(t,s,a)});break;case"Quantumult X":t.method=s,this.isNeedRewrite&&(t.opts=t.opts||{},Object.assign(t.opts,{hints:!1})),$task.fetch(t).then(t=>{const{statusCode:s,statusCode:a,headers:r,body:i,bodyBytes:o}=t;e(null,{status:s,statusCode:a,headers:r,body:i,bodyBytes:o},i,o)},t=>e(t&&t.error||"UndefinedError"));break;case"Node.js":let a=require("iconv-lite");this.initGotEnv(t);const{url:r,...i}=t;this.got[s](r,i).then(t=>{const{statusCode:s,statusCode:r,headers:i,rawBody:o}=t,n=a.decode(o,this.encoding);e(null,{status:s,statusCode:r,headers:i,rawBody:o,body:n},n)},t=>{const{message:s,response:r}=t;e(s,r,r&&a.decode(r.rawBody,this.encoding))})}}time(t,e=null){const s=e?new Date(e):new Date;let a={"M+":s.getMonth()+1,"d+":s.getDate(),"H+":s.getHours(),"m+":s.getMinutes(),"s+":s.getSeconds(),"q+":Math.floor((s.getMonth()+3)/3),S:s.getMilliseconds()};/(y+)/.test(t)&&(t=t.replace(RegExp.$1,(s.getFullYear()+"").substr(4-RegExp.$1.length)));for(let e in a)new RegExp("("+e+")").test(t)&&(t=t.replace(RegExp.$1,1==RegExp.$1.length?a[e]:("00"+a[e]).substr((""+a[e]).length)));return t}queryStr(t){let e="";for(const s in t){let a=t[s];null!=a&&""!==a&&("object"==typeof a&&(a=JSON.stringify(a)),e+=`${s}=${a}&`)}return e=e.substring(0,e.length-1),e}msg(e=t,s="",a="",r){const i=t=>{switch(typeof t){case void 0:return t;case"string":switch(this.getEnv()){case"Surge":case"Stash":default:return{url:t};case"Loon":case"Shadowrocket":return t;case"Quantumult X":return{"open-url":t};case"Node.js":return}case"object":switch(this.getEnv()){case"Surge":case"Stash":case"Shadowrocket":default:{let e=t.url||t.openUrl||t["open-url"];return{url:e}}case"Loon":{let e=t.openUrl||t.url||t["open-url"],s=t.mediaUrl||t["media-url"];return{openUrl:e,mediaUrl:s}}case"Quantumult X":{let e=t["open-url"]||t.url||t.openUrl,s=t["media-url"]||t.mediaUrl,a=t["update-pasteboard"]||t.updatePasteboard;return{"open-url":e,"media-url":s,"update-pasteboard":a}}case"Node.js":return}default:return}};if(!this.isMute)switch(this.getEnv()){case"Surge":case"Loon":case"Stash":case"Shadowrocket":default:$notification.post(e,s,a,i(r));break;case"Quantumult X":$notify(e,s,a,i(r));break;case"Node.js":}if(!this.isMuteLog){let t=["","==============📣系统通知📣=============="];t.push(e),s&&t.push(s),a&&t.push(a),console.log(t.join("\n")),this.logs=this.logs.concat(t)}}log(...t){t.length>0&&(this.logs=[...this.logs,...t]),console.log(t.join(this.logSeparator))}logErr(t,e){switch(this.getEnv()){case"Surge":case"Loon":case"Stash":case"Shadowrocket":case"Quantumult X":default:this.log("",`❗️${this.name}, 错误!`,t);break;case"Node.js":this.log("",`❗️${this.name}, 错误!`,t.stack)}}wait(t){return new Promise(e=>setTimeout(e,t))}done(t={}){const e=(new Date).getTime(),s=(e-this.startTime)/1e3;switch(this.log("",`🔔${this.name}, 结束! 🕛 ${s} 秒`),this.log(),this.getEnv()){case"Surge":case"Loon":case"Stash":case"Shadowrocket":case"Quantumult X":default:$done(t);break;case"Node.js":process.exit(1)}}}(t,e)}
+
+
+  // ---------- 等待上游收尾 ----------
+  await __donePromise;
+  return {};
+}

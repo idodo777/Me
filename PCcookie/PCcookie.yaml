@@ -1,0 +1,189 @@
+# Paperclip · Cookie 抓取合集（Egern 版）
+# 原作: MaYIHEI
+# 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/loon/paperclip-cookie/paperclip-cookie.lpx
+# 上游更新日期: 2026-10-28
+# 拦截数量: 0
+# 脚本数量: 33
+name: Paperclip · Cookie 抓取合集
+description: 抓取签到Cookie
+author: MaYIHEI
+homepage: https://github.com/MaYIHEI/paperclip/tree/main/loon/paperclip-cookie
+scriptings:
+- http_request:
+    name: 微博超话 Cookie
+    match: '^https://api\.weibo\.cn/2/(statuses/container_timeline_topicsub|page/button)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/weibotalk.js?v=1
+    body_required: true
+- http_request:
+    name: 腾讯视频 Cookie
+    match: '^https://pbaccess\.video\.qq\.com/'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/tenvideo.js?v=1
+- http_response:
+    name: 米游社 Cookie
+    match: '^https://api-takumi\.(miyoushe|mihoyo)\.com/(binding/api/getUserGameRolesByStoken|event/luna/)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/mihoyo.js?v=1
+    body_required: true
+- http_request:
+    name: 一点万象 Cookie
+    match: '^https://app\.mixcapp\.com/mixc/api/v4/member/getPersonalData'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/newmixc.js?v=1
+- http_request:
+    name: 小米商城 Cookie
+    match: '^https://shop-api\.retail\.mi\.com/mtop/mf/act/infinite/(do|done)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/mishop.js?v=1
+- http_request:
+    name: 小米抽奖 Cookie
+    match: '^https://shop-api\.retail\.mi\.com/mtop/navi/venue/batch'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/milottery.js?v=1
+    body_required: true
+- http_request:
+    name: 有品 Cookie
+    match: '^https://m\.xiaomiyoupin\.com/mtop/act/redPacketSign/getActInfo'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/youpin.js?v=1
+- http_request:
+    name: 龙湖App Cookie
+    match: '^https://gw2c-hw-open\.longfor\.com/lmarketing-task-api-mvc-prod/openapi/task/v1/signature/clock$'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/lhtj.js?v=1
+- http_request:
+    name: QQ音乐 Cookie
+    match: '^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/qqmusic.js?v=1
+    body_required: true
+- http_request:
+    name: 万达电影 Cookie
+    match: '^https://user-api-prd-mx\.wandafilm\.com/user/user_info'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/wanda.js?v=1
+- http_request:
+    name: 听听FM Cookie
+    match: '^https://xunting\.vbegin\.com\.cn/sns/app'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/tingtingfm.js?v=1
+- http_request:
+    name: WPS Cookie
+    match: '^https://personal-act\.wps\.cn/activity-rubik/activity/page_info'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/wps.js?v=1
+- http_request:
+    name: 扫描全能王 Cookie
+    match: '^https://api-cs\.intsig\.net/user/cs/get_user_attribute'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/camscanner.js?v=1
+- http_request:
+    name: 追觅 Cookie
+    match: '^https://cn-wxmall\.dreame\.tech/main/my/info'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/dreame.js?v=1
+    body_required: true
+- http_request:
+    name: 灵狐灵购 Cookie
+    match: '^https://cn-yx-wxmall\.dreame\.tech/main/my/info'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/linghu.js?v=1
+    body_required: true
+- http_request:
+    name: NodeSeek Cookie
+    match: '^https://www\.nodeseek\.com/'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/nodeseek.js?v=1
+- http_request:
+    name: 123社区 Cookie
+    match: '^https://pan1\.me/(\?|$)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/pan1.js?v=1
+- http_request:
+    name: 百度网盘 Cookie
+    match: '^https://pan\.baidu\.com/coins/taskcenter/signinlist'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/baidunetdisk.js?v=1
+- http_request:
+    name: 徕芬 Cookie
+    match: '^https://app-gw\.shuye\.com/member/user/profile'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/laifen.js?v=1
+- http_request:
+    name: 中国移动 Cookie（自动登录）
+    match: '^https://client\.app\.coc\.10086\.cn/biz-orange/[LD]N/uam(onekey|randcode)login/autoLogin'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/cmcc.js?v=1
+    body_required: true
+- http_request:
+    name: 中国移动 Cookie（积分查询）
+    match: '^https://clientaccess\.10086\.cn/biz-orange/BN/scoreQueryService/getScoreQuery'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/cmcc.js?v=1
+    body_required: true
+- http_request:
+    name: 中国移动 Cookie（北京签到）
+    match: '^https://h5\.bj\.10086\.cn/ActSignIn2023/doPrize'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/cmcc.js?v=1
+- http_request:
+    name: 小黑盒 Cookie
+    match: '^https://api\.xiaoheihe\.cn/task/sign_list'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/heybox.js?v=1
+- http_response:
+    name: 泡泡玛特 Cookie
+    match: '^https://popvip\.paquapp\.com/miniapp/v2/(svip_lite/user_info|wechat_message/template_info)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/ppmt.js?v=1
+    body_required: true
+- http_request:
+    name: 途虎养车 Cookie
+    match: '^https://api\.tuhu\.cn/User/(GetMemberSignInInfoAsync|GetRightsList)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/tuhu.js?v=1
+- http_request:
+    name: 海底捞 Cookie
+    match: '^https://superapp-public\.kiwa-tech\.com/activity/wxapp/signin/(query|querySite|querySwitch|queryFragment|signin)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/haidilao.js?v=1
+- http_request:
+    name: 惠省红包墙 Cookie
+    match: '^https://media\.meituan\.com/fulishemini/couponActivity/listActivityCoupon'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/huisheng.js?v=1
+    body_required: true
+- http_request:
+    name: 名创优品 Cookie
+    match: '^https://member-center\.miniso\.com/userinfo/userinfo/GetUserInfoV3'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/miniso.js?v=1
+- http_request:
+    name: 北京华联 Cookie
+    match: '^https://a\.china-smartech\.com/restful/mall/\d+/checkInForm'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/bhg.js?v=1
+- http_request:
+    name: 龙德广场 Cookie
+    match: '^https://a\.china-smartech\.com/restful/mall/\d+/checkInForm'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/longde.js?v=1
+- http_request:
+    name: 龙湖天街 Cookie
+    match: '^https://gw2c-hw-open\.longfor\.com/lmarketing-task-api-mvc-prod/openapi/task/v1/signature/clock$'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/lhtjmp.js?v=1
+- http_response:
+    name: 味多美 Cookie
+    match: '^https://scrm-b\.zjian\.net/api/member/(minaLogin|find)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/wedome.js?v=1
+    body_required: true
+- http_request:
+    name: 林里 Cookie
+    match: '^https://webapi\.qmai\.cn/web/(cmk-center/sign/(activityInfo|userSignStatistics|userSignRecordCalendar)|catering/common/common-info|mall-apiserver/integral/(home/index|item/goods(/detail)?))'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/linli.js?v=1
+    body_required: true
+mitm:
+  hostnames:
+    - api.weibo.cn
+    - pbaccess.video.qq.com
+    - vip.video.qq.com
+    - api-takumi.miyoushe.com
+    - api-takumi.mihoyo.com
+    - app.mixcapp.com
+    - shop-api.retail.mi.com
+    - m.xiaomiyoupin.com
+    - gw2c-hw-open.longfor.com
+    - u6.y.qq.com
+    - user-api-prd-mx.wandafilm.com
+    - xunting.vbegin.com.cn
+    - personal-act.wps.cn
+    - api-cs.intsig.net
+    - cn-wxmall.dreame.tech
+    - cn-yx-wxmall.dreame.tech
+    - www.nodeseek.com
+    - pan1.me
+    - pan.baidu.com
+    - app-gw.shuye.com
+    - client.app.coc.10086.cn
+    - clientaccess.10086.cn
+    - h5.bj.10086.cn
+    - api.xiaoheihe.cn
+    - popvip.paquapp.com
+    - api.tuhu.cn
+    - superapp-public.kiwa-tech.com
+    - media.meituan.com
+    - member-center.miniso.com
+    - a.china-smartech.com
+    - scrm-b.zjian.net
+    - webapi.qmai.cn
