@@ -19,31 +19,31 @@ scriptings:
 - http_request:
     name: 腾讯视频请求净化
     match: ^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXsp.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo.js?v=1
     body_required: true
     binary_body: true
 - http_response:
     name: 腾讯视频响应净化
     match: ^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXsp.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo.js?v=1
     body_required: true
     binary_body: true
 - http_response:
     name: 腾讯视频iacc净化
     match: ^https?:\/\/iacc\.qq\.com\/(?:\?.*)?$
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXsp.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo.js?v=1
     body_required: true
     binary_body: true
 - http_response:
     name: 腾讯视频AB配置净化
     match: ^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig(?:\?.*)?$
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXsp.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo.js?v=1
     body_required: true
     binary_body: true
 - http_response:
     name: 腾讯视频rdelivery净化
     match: ^https:\/\/rdelivery\.qq\.com\/v1\/sdkconfig\/get(?:\?.*)?$
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXsp.js?v=1
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo.js?v=1
     body_required: true
 mitm:
   hostnames:
