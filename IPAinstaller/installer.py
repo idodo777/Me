@@ -135,10 +135,10 @@ button.ghost{background:#e8e8ea;color:#111}
 </style></head><body><div class="wrap">
 <h1>IPA 安装助手</h1>
 <div class="card">
-<div class="note">准备（只做一次）：① 微软商店装免费 App「Apple 设备」；② 手机用数据线连电脑、解锁，弹窗点「信任」。</div>
-<div class="note" style="margin-top:8px">取件站链接（手机上打开取件站的那个完整链接，粘一次就行）：</div>
+<div class="note">准备（只做一次）：① 微软商店装免费 App「Apple 设备」；② 手机用数据线连电脑、解锁，弹窗点「信任」。取件站链接已内置，打开就能用。</div>
+<details style="margin-top:8px"><summary class="note">链接设置（一般不用动）</summary>
 <input id="station" placeholder="http://…/取件链接">
-<button onclick="saveStation()">保存链接</button>
+<button onclick="saveStation()">保存链接</button></details>
 <button class="ghost" onclick="quit()">退出助手</button>
 </div>
 <div class="card"><b>服务器上的 IPA</b> <button class="ghost" onclick="loadFiles()">刷新</button>
