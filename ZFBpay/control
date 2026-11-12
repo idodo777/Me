@@ -1,0 +1,9 @@
+Package: com.idodo777.zfbpay
+Name: ZFBpay
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: 支付宝精简 + 悬浮底栏（AlipayLite 重建版 v1）
+Maintainer: idodo777
+Author: idodo777
+Section: Tweaks
+Depends: mobilesubstrate, firmware (>= 15.0)
