@@ -3,6 +3,9 @@
 // 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/qqmusic/qqmusic.js
 // 上游更新日期: 2026-10-28
 // 移植说明: 上游脚本逻辑原样保留，仅在外层把 Surge 环境 API（$request/$persistentStore/$httpClient/$notification/$done）桥接到 Egern ctx。
+// Egern 适配 (2026-11-12): 上游 Surge/Stash 配置靠 cron 的 timeout=1200 兜底单次运行，Egern 的 schedule 脚本不认 timeout 字段，
+//   网络一慢整次运行会被 Egern 以"脚本执行超时"掐掉。桥接层给未指定 timeout 的请求默认 8 秒超时（ctx.http 的 timeout 单位是毫秒），
+//   单个慢请求失败后脚本正常收尾、下一分钟的 cron 再重试，不再整次被掐。
 export default async function (ctx) {
   // 抓取开关（模块参数 GETCK）：关闭时请求脚本直接放行，不抓取、不通知；定时任务不受影响
   if (ctx.request && ctx.env && ctx.env.GETCK === "false") return {};
@@ -27,7 +30,7 @@ export default async function (ctx) {
     (async () => {
       try {
         const __o = typeof opts === "string" ? { url: opts } : (opts || {});
-        const __init = { headers: __o.headers || {}, timeout: __o.timeout };
+        const __init = { headers: __o.headers || {}, timeout: __o.timeout != null ? __o.timeout : 8000 };
         let __resp;
         if (method === "GET") __resp = await ctx.http.get(__o.url, __init);
         else if (method === "POST") __resp = await ctx.http.post(__o.url, { ...__init, body: __o.body });

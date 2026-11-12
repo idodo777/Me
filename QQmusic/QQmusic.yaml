@@ -16,27 +16,26 @@ env_schema:
     options:
     - "true"
     - "false"
+# 注: Egern 的 schedule 脚本只认 name/cron/script_url,不认 timeout 字段(上游 Surge/Stash 的 timeout=1200 在此无效);
+# 单请求时限改由脚本桥接层默认 8 秒兜底,见 QQmusic.js 头注。cron 表达式与上游一字不差(2026-11-12 已校对)。
 scriptings:
 - http_request:
     name: QQ音乐 Cookie
     match: '^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=3
     body_required: true
 - schedule:
     name: QQ音乐每日任务
     cron: "30 7 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
-    timeout: 1200
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=3
 - schedule:
     name: QQ音乐定时金币
     cron: "* 9-10 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
-    timeout: 1200
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=3
 - schedule:
     name: QQ音乐红包雨
     cron: "5 0,8,12,16,20,22 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=2
-    timeout: 1200
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=3
 mitm:
   hostnames:
     - u6.y.qq.com
