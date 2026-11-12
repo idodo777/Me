@@ -3,7 +3,7 @@
 // @name:zh-CN   ARM Store 简体中文翻译 + 去广告
 // @name:en      ARM Store Simplified Chinese Translator + Ad Remover
 // @namespace    armconverter-store-zh-cn
-// @version      1.2.0
+// @version      2.0.0
 // @downloadURL  https://raw.githubusercontent.com/idodo777/Me/main/ARMstore/armconverter-store-zh-CN.user.js
 // @updateURL    https://raw.githubusercontent.com/idodo777/Me/main/ARMstore/armconverter-store-zh-CN.user.js
 // @description  将 armconverter.com 的 ARM Store 界面翻译为简体中文，并屏蔽广告元素（广告位、广告 iframe、弹窗广告等）。
@@ -23,9 +23,15 @@
      *   1. 让 ARM Store 页面直接以简体中文呈现；
      *   2. 屏蔽页面中的广告元素。
      *
-     * 实现方式（与常见的 i18n 用户脚本一致）：
-     *   - 翻译：全量字符串映射（整串精确匹配）+ 安全片段替换 +
-     *     MutationObserver 监听动态内容 + 属性（placeholder/title 等）翻译。
+     * 实现方式（两层通用引擎，不按页面逐条收录）：
+     *   - 精准层：字符串映射（整串精确匹配）+ 安全片段替换 +
+     *     前缀/正则规则，覆盖按钮、标题、标签等界面词，离线即时生效。
+     *   - 通杀层：精准层没命中的英文句子，一律走在线机翻
+     *     （Google 翻译接口优先，失败退到 MyMemory），译文缓存进
+     *     localStorage；新页面、新文案无需再逐条收录。
+     *     机翻只动多词英文句子，应用名/包名/数字/链接不动；
+     *     接口不通时静默保留英文，不破坏页面。
+     *   - MutationObserver 监听动态内容 + 属性（placeholder/title 等）翻译。
      *     商店内容需登录后才渲染，全部是动态写入 DOM 的，
      *     因此不能只在加载时替换一次，必须持续监听。
      *   - 去广告：三层防御——
@@ -283,6 +289,18 @@
         ['for full version history access.', '以查看完整版本历史。'],
         ['(current)', '（当前版本）'],
         ['Current', '当前版本'],
+
+        // ---- 截图反馈补充：详情页标题 / 区块标题 ----
+        ['View in App Store', '在 App Store 中查看'],
+        ['Disclaimer', '免责声明'],
+        ['Download Options', '下载选项'],
+        ['Report this app · DMCA', '举报此应用 · DMCA'],
+        ['App Description', '应用描述'],
+        ['App Information', '应用信息'],
+        ['How to Install with Sideloadly', '如何使用 Sideloadly 安装'],
+        ['About the file size:', '关于文件大小：'],
+        ['for your computer', '电脑版'],
+        ['Developer Mode', '开发者模式'],
     ];
 
     const EXACT = new Map(DICT);
@@ -296,6 +314,7 @@
 
     // 片段替换：只放不会与应用名/包名冲突的安全片段，长片段在前。
     const FRAGMENTS = [
+        ['ARM Store', 'ARM 商店'],
         ['Downloads the decrypted .ipa file straight to your device.', '将解密后的 .ipa 文件直接下载到你的设备。'],
         ['Choose this if you already have a way to install IPAs yourself, such as Sideloadly, AltStore, or your own signing certificate/service.', '如果你已有自行安装 IPA 的方式（如 Sideloadly、AltStore 或自己的签名证书/服务），请选择此项。'],
         ['Report an app · DMCA takedown', '举报应用 · DMCA 下架请求'],
@@ -319,6 +338,8 @@
         [/^Approx\. wait time:\s*(\d+)\s*seconds?$/, (m) => '预计等待时间：' + m[1] + ' 秒'],
         // "Version History for 红果短剧 - …"（弹窗标题，应用名动态）
         [/^Version History for\s+(.+)$/, (m) => m[1] + ' 的版本历史'],
+        // "(9,424,366 ratings)"（评分人数动态）
+        [/^\(([\d,]+)\s*ratings?\)$/, (m) => '（' + m[1] + ' 个评分）'],
     ];
 
     // ---------- 词条查表 ----------
@@ -348,11 +369,12 @@
             return raw.slice(0, i) + EXACT_CI.get(trimmed.toLowerCase()) + raw.slice(i + trimmed.length);
         }
 
-        // 1.4) 作者行 "by <开发者> v<版本>" → "作者：<开发者> v<版本>"
-        const bm = trimmed.match(/^by\s+(.+?)\s+(v[\d][\d.]*)$/i);
-        if (bm) {
+        // 1.4) 作者行 "by <开发者>"（版本号可有可无）→ "作者：<开发者>"
+        //      排除以 by 开头的普通句子（如 by downloading…），只认名字。
+        const bm = trimmed.match(/^by\s+(.+?)(?:\s+(v[\d][\d.]*))?$/i);
+        if (bm && !/\b(you|this|that|downloading|installing|clicking|using|agree)\b/i.test(bm[1])) {
             const i = raw.indexOf(trimmed);
-            return raw.slice(0, i) + '作者：' + bm[1] + ' ' + bm[2] + raw.slice(i + trimmed.length);
+            return raw.slice(0, i) + '作者：' + bm[1] + (bm[2] ? ' ' + bm[2] : '') + raw.slice(i + trimmed.length);
         }
 
         // 1.5) 前置 emoji / 符号：拆出前缀符号，只翻译其后的实体文本
@@ -388,6 +410,148 @@
         return changed ? out : raw;
     }
 
+    // ========== 机器翻译兜底（通杀层） ==========
+    // 精准层没命中的英文句子走在线机翻：Google 翻译接口优先，
+    // 失败退到 MyMemory；两路都失败时静默保留英文。
+    // 译文缓存进 localStorage，重复打开页面不再重复请求。
+    const MT_LS_KEY = 'armstore-mt-v1';
+    const MT_CACHE = new Map();
+    try {
+        const saved = JSON.parse(localStorage.getItem(MT_LS_KEY) || '{}');
+        for (const [k, v] of Object.entries(saved)) MT_CACHE.set(k, v);
+    } catch (e) {}
+    let mtSaveTimer = 0;
+    function mtSaveCache() {
+        clearTimeout(mtSaveTimer);
+        mtSaveTimer = setTimeout(() => {
+            try {
+                while (MT_CACHE.size > 500) MT_CACHE.delete(MT_CACHE.keys().next().value);
+                localStorage.setItem(MT_LS_KEY, JSON.stringify(Object.fromEntries(MT_CACHE)));
+            } catch (e) {}
+        }, 500);
+    }
+
+    const MT_QUEUED = new WeakSet();
+    const MT_FAILED = new WeakSet();
+    const MT_PENDING = new Map(); // 原文 -> Promise<译文>（同文去重）
+    const MT_QUEUE = [];
+    let mtActive = 0;
+    const MT_CONCURRENCY = 3;
+    const mtFails = { gtx: 0, mymemory: 0 };
+
+    // 只机翻多词英文句子：标题元素里的应用名、包名、数字、链接、
+    // 已含中文的一律不动；短标签留给精准层，避免误伤。
+    function looksTranslatable(node, text) {
+        const t = (text || '').trim();
+        if (t.length < 12) return false;
+        if (/[\u4e00-\u9fff]/.test(t)) return false;
+        if (!/\s/.test(t)) return false;
+        if (t.length < 30 && !/[.!?:;]$/.test(t)) return false;
+        const letters = (t.match(/[A-Za-z]/g) || []).length;
+        if (letters < 4 || letters / t.length < 0.5) return false;
+        if (t.includes('://') || t.includes('@')) return false;
+        try {
+            const el = node.parentElement;
+            if (el && el.closest('h1,h2,h3,h4,h5,h6')) return false; // 标题多为应用名
+        } catch (e) {}
+        return true;
+    }
+
+    async function fetchWithTimeout(url, ms) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), ms);
+        try {
+            return await fetch(url, { signal: ctrl.signal });
+        } finally { clearTimeout(timer); }
+    }
+
+    async function fetchMTgtx(text) {
+        const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=' + encodeURIComponent(text);
+        const res = await fetchWithTimeout(url, 8000);
+        if (!res.ok) throw new Error('gtx http ' + res.status);
+        const data = await res.json();
+        const out = ((data && data[0]) || []).map(seg => (seg && seg[0]) || '').join('');
+        if (!out || out === text) throw new Error('gtx empty');
+        return out;
+    }
+
+    async function fetchMTMyMemory(text) {
+        const url = 'https://api.mymemory.translated.net/get?q=' + encodeURIComponent(text) + '&langpair=en|zh-CN';
+        const res = await fetchWithTimeout(url, 8000);
+        if (!res.ok) throw new Error('mm http ' + res.status);
+        const data = await res.json();
+        const out = data && data.responseData && data.responseData.translatedText;
+        if (!out || out === text) throw new Error('mm empty');
+        return out;
+    }
+
+    function fetchMT(text) {
+        let p = MT_PENDING.get(text);
+        if (p) return p;
+        p = (async () => {
+            if (mtFails.gtx < 3) {
+                try {
+                    const zh = await fetchMTgtx(text);
+                    mtFails.gtx = 0;
+                    return zh;
+                } catch (e) { mtFails.gtx++; }
+            }
+            if (mtFails.mymemory < 3) {
+                try {
+                    const zh = await fetchMTMyMemory(text);
+                    mtFails.mymemory = 0;
+                    return zh;
+                } catch (e) { mtFails.mymemory++; }
+            }
+            throw new Error('all mt endpoints dead');
+        })();
+        p.then(
+            zh => { MT_CACHE.set(text, zh); MT_PENDING.delete(text); mtSaveCache(); },
+            () => { MT_PENDING.delete(text); }
+        );
+        MT_PENDING.set(text, p);
+        return p;
+    }
+
+    function queueMT(node) {
+        if (MT_QUEUE.length > 200) return;
+        if (MT_QUEUED.has(node) || MT_FAILED.has(node)) return;
+        if (!looksTranslatable(node, node.nodeValue)) return;
+        MT_QUEUED.add(node);
+        MT_QUEUE.push(node);
+        pumpMT();
+    }
+
+    function pumpMT() {
+        while (mtActive < MT_CONCURRENCY && MT_QUEUE.length) {
+            const node = MT_QUEUE.shift();
+            mtActive++;
+            translateNodeMT(node).finally(() => { mtActive--; pumpMT(); });
+        }
+    }
+
+    async function translateNodeMT(node) {
+        const raw = node.nodeValue;
+        const trimmed = raw.trim();
+        if (MT_CACHE.has(trimmed)) { applyMT(node, raw); return; }
+        try {
+            await fetchMT(trimmed);
+            applyMT(node, raw);
+        } catch (e) {
+            MT_FAILED.add(node);
+        }
+    }
+
+    function applyMT(node, raw) {
+        if (!node.isConnected) return;
+        if (node.nodeValue !== raw) return; // 排队期间已被改过（如精准层已翻），不动
+        const trimmed = raw.trim();
+        const zh = MT_CACHE.get(trimmed);
+        if (!zh || zh === trimmed) return;
+        const i = raw.indexOf(trimmed);
+        node.nodeValue = raw.slice(0, i) + zh + raw.slice(i + trimmed.length);
+    }
+
     // ---------- 翻译：文本节点与属性 ----------
     function skipNode(node) {
         const p = node.parentNode;
@@ -401,7 +565,8 @@
         const data = node.nodeValue;
         if (!data) return;
         const next = translate(data);
-        if (next !== data) node.nodeValue = next;
+        if (next !== data) { node.nodeValue = next; return; }
+        queueMT(node); // 精准层没命中，交给机翻兜底
     }
 
     const ATTRS = ['placeholder', 'title', 'aria-label', 'alt', 'value'];
