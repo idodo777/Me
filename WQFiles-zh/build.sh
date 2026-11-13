@@ -12,9 +12,27 @@ FINAL_IPA=${WQFILES_FINAL_IPA:-WQFiles.ipa}
 
 # Publish only after the host regression suite passes. The packaged artifact
 # still needs device validation, but this prevents a known-broken source tree
-# from replacing the release IPA.
-if [[ "${WQ_SKIP_PREFLIGHT:-0}" != 1 && -x "$ROOT/tests/run_all_tests.sh" ]]; then
-    "$ROOT/tests/run_all_tests.sh"
+# from replacing the release IPA. The runner is required: a missing runner
+# fails the build. WQ_SKIP_PREFLIGHT=1 is the only bypass and says so loudly.
+PREFLIGHT_RUNNER="$ROOT/tests/run_all_tests.sh"
+if [[ "${WQ_SKIP_PREFLIGHT:-0}" == 1 ]]; then
+    {
+        echo "************************************************************"
+        echo "WARNING: host regression preflight SKIPPED (WQ_SKIP_PREFLIGHT=1)."
+        echo "This IPA has not passed tests/run_all_tests.sh."
+        echo "************************************************************"
+    } >&2
+else
+    if [[ ! -f "$PREFLIGHT_RUNNER" ]]; then
+        echo "preflight runner missing: $PREFLIGHT_RUNNER" >&2
+        echo "restore it, or set WQ_SKIP_PREFLIGHT=1 to build without the regression gate" >&2
+        exit 1
+    fi
+    # Through bash, so a lost executable bit cannot silently skip the gate.
+    bash "$PREFLIGHT_RUNNER" || {
+        echo "preflight failed: $PREFLIGHT_RUNNER (no IPA written)" >&2
+        exit 1
+    }
 fi
 if [[ "$FINAL_IPA" != /* ]]; then
     FINAL_IPA="$ROOT/$FINAL_IPA"
@@ -61,9 +79,12 @@ xcrun --sdk iphoneos clang -fobjc-arc -fmodules -fmodules-cache-path="$OUT/Modul
     -miphoneos-version-min="$MINIMUM_IOS_VERSION" \
     -isysroot "$SDK" -Wall -Wextra -Werror -O2 \
     -framework UIKit -framework Foundation -framework Security -framework UniformTypeIdentifiers \
-    WQCore.m WQAccess.m WQLaunchServices.m WQUI.m WQSharing.m WQApps.m WQCache.m WQPlistEditor.m WQHexViewer.m main.m -o "$APP/WQFiles"
+    WQCore.m WQAccess.m WQLocalization.m WQLaunchServices.m WQUI.m WQSharing.m WQApps.m WQCache.m WQPlistEditor.m WQHexViewer.m WQSQLiteViewer.m WQSQLiteSave.m WQHealth.m WQTrash.m WQArchive.m WQSyntax.m WQMediaStream.m main.m -lsqlite3 -lz -o "$APP/WQFiles"
 cp Info.plist "$APP/Info.plist"
 cp icons/AppIcon*@*.png "$APP/"
+for lproj in "$ROOT"/*.lproj; do
+    [[ -d "$lproj" ]] && cp -R "$lproj" "$APP/"
+done
 plutil -convert binary1 "$APP/Info.plist"
 codesign -f -s - --entitlements entitlements.plist "$APP"
 

@@ -159,6 +159,14 @@ static void TestTreeSignatures(void)
         NSString *destinationIdentity = WQAppsSupportTreeSignature(dst, YES, &exists, &error);
         WQCheck(destinationIdentity && ![before isEqualToString:destinationIdentity]);
 
+        // CR-07: unsupported special entries are left out of both variants and counted.
+        NSString *fifo = [src stringByAppendingPathComponent:@"nested/pipe"];
+        WQCheck(mkfifo(fifo.fileSystemRepresentation, 0600) == 0);
+        NSUInteger omitted = 0;
+        WQCheck([WQAppsSupportTreeSignatureOmitting(src, NO, &exists, &omitted, &error) isEqualToString:destinationShape] && omitted == 1);
+        WQCheck(WQAppsSupportTreeSignatureOmitting(src, YES, &exists, &omitted, &error).length > 0 && omitted == 1);
+        WQCheck(unlink(fifo.fileSystemRepresentation) == 0);
+
         // A source mutation after the signature was captured must be visible.
         WQCheck([[@"original plus more" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:file atomically:YES]);
         NSString *changed = WQAppsSupportTreeSignature(src, YES, &exists, &error);
@@ -166,6 +174,74 @@ static void TestTreeSignatures(void)
     } @finally {
         [fm removeItemAtPath:base error:nil];
     }
+}
+
+
+static void TestImportRoot(void)
+{
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSString *base = [NSTemporaryDirectory() stringByAppendingPathComponent:
+                      [@"WQImportRoot-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+    void (^mk)(NSString *) = ^(NSString *rel) {
+        [fm createDirectoryAtPath:[base stringByAppendingPathComponent:rel] withIntermediateDirectories:YES attributes:nil error:nil];
+    };
+    void (^file)(NSString *, id) = ^(NSString *rel, id plist) {
+        NSString *path = [base stringByAppendingPathComponent:rel];
+        [fm createDirectoryAtPath:path.stringByDeletingLastPathComponent withIntermediateDirectories:YES attributes:nil error:nil];
+        if ([plist isKindOfClass:NSDictionary.class]) [plist writeToFile:path atomically:YES];
+        else [[@"x" dataUsingEncoding:NSUTF8StringEncoding] writeToFile:path atomically:YES];
+    };
+    NSString *error = nil;
+    // Documents/Library directly in the picked folder.
+    mk(@"direct/Documents"); mk(@"direct/tmp"); file(@"direct/.DS_Store", nil); file(@"direct/notes.txt", nil);
+    NSString *direct = [base stringByAppendingPathComponent:@"direct"];
+    WQCheck([WQAppsSupportImportRoot(direct, &error) isEqualToString:direct]);
+    WQCheck([WQAppsSupportImportIgnored(direct) isEqualToArray:(@[@"notes.txt", @"tmp"])]);
+    // Wrapped (a shared backup ZIP) with a WQ Files checklist.
+    mk(@"wrapped/Telegram 2026-11-11/Library");
+    file(@"wrapped/Telegram 2026-11-11/.wqbackup.plist", @{@"BundleID": @"ph.telegra.Telegraph"});
+    mk(@"wrapped/__MACOSX/x/Documents");
+    NSString *wrapped = [base stringByAppendingPathComponent:@"wrapped/Telegram 2026-11-11"];
+    WQCheck([WQAppsSupportImportRoot([base stringByAppendingPathComponent:@"wrapped"], &error) isEqualToString:wrapped]);
+    WQCheck([WQAppsSupportImportDeclaredBundle(wrapped) isEqualToString:@"ph.telegra.Telegraph"]);
+    WQCheck(WQAppsSupportImportIgnored(wrapped).count == 0);
+    // A container copy, two levels down, identified by its metadata file.
+    mk(@"deep/export/Container/Documents");
+    file(@"deep/export/Container/.com.apple.mobile_container_manager.metadata.plist", @{@"MCMMetadataIdentifier": @"com.example.app"});
+    NSString *deep = [base stringByAppendingPathComponent:@"deep/export/Container"];
+    WQCheck([WQAppsSupportImportRoot([base stringByAppendingPathComponent:@"deep"], &error) isEqualToString:deep]);
+    WQCheck([WQAppsSupportImportDeclaredBundle(deep) isEqualToString:@"com.example.app"]);
+    WQCheck(WQAppsSupportImportDeclaredBundle(direct) == nil);
+    // CR-06: every declaration counts; conflicts and invalid IDs are visible.
+    mk(@"both/Documents");
+    file(@"both/.wqbackup.plist", @{@"BundleID": @"com.example.a"});
+    file(@"both/.com.apple.mobile_container_manager.metadata.plist", @{@"MCMMetadataIdentifier": @"com.example.b"});
+    NSString *both = [base stringByAppendingPathComponent:@"both"];
+    NSString *invalid = nil;
+    WQCheck([WQAppsSupportImportDeclaredBundles(both, &invalid) isEqualToArray:(@[@"com.example.a", @"com.example.b"])] && !invalid);
+    mk(@"same/Documents");
+    file(@"same/.wqbackup.plist", @{@"BundleID": @"com.example.a"});
+    file(@"same/.com.apple.mobile_container_manager.metadata.plist", @{@"MCMMetadataIdentifier": @"com.example.a"});
+    WQCheck([WQAppsSupportImportDeclaredBundles([base stringByAppendingPathComponent:@"same"], &invalid) isEqualToArray:(@[@"com.example.a"])] && !invalid);
+    mk(@"bad/Documents");
+    file(@"bad/.wqbackup.plist", @{@"BundleID": @"../evil"});
+    file(@"bad/.com.apple.mobile_container_manager.metadata.plist", @{@"MCMMetadataIdentifier": @"com.example.b"});
+    NSArray *badIDs = WQAppsSupportImportDeclaredBundles([base stringByAppendingPathComponent:@"bad"], &invalid);
+    WQCheck([badIDs isEqualToArray:(@[@"com.example.b"])] && [invalid isEqualToString:@"../evil"]);
+    mk(@"nonstring/Documents");
+    file(@"nonstring/.wqbackup.plist", @{@"BundleID": @42});
+    WQCheck(WQAppsSupportImportDeclaredBundles([base stringByAppendingPathComponent:@"nonstring"], &invalid).count == 0 && [invalid isEqualToString:@"42"]);
+    WQCheck(WQAppsSupportImportDeclaredBundles(direct, &invalid).count == 0 && !invalid);
+    // Two apps side by side: ambiguous.
+    mk(@"two/A/Documents"); mk(@"two/B/Library");
+    error = nil;
+    WQCheck(WQAppsSupportImportRoot([base stringByAppendingPathComponent:@"two"], &error) == nil && [error containsString:@"A, B"]);
+    // Nothing usable; a symlinked Documents doesn't count.
+    mk(@"none/Pictures");
+    [fm createSymbolicLinkAtPath:[base stringByAppendingPathComponent:@"none/Documents"] withDestinationPath:@"/tmp" error:nil];
+    error = nil;
+    WQCheck(WQAppsSupportImportRoot([base stringByAppendingPathComponent:@"none"], &error) == nil && error.length > 0);
+    [fm removeItemAtPath:base error:nil];
 }
 
 int main(void)
@@ -176,6 +252,7 @@ int main(void)
         TestBundleIdentifiers();
         TestJournalStates();
         TestTreeSignatures();
+        TestImportRoot();
         if (failures) {
             fprintf(stderr, "%d Apps regression check(s) failed\n", failures);
             return 1;

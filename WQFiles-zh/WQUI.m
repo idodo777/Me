@@ -7,6 +7,7 @@
 #import "WQUI.h"
 #import "WQAccess.h"
 #import "WQLaunchServices.h"
+#import <fcntl.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
 
@@ -14,7 +15,7 @@
 NSString *wq_device_line(void)
 {
     struct utsname u;
-    NSString *machine = (uname(&u) == 0) ? @(u.machine) : @"未知";
+    NSString *machine = (uname(&u) == 0) ? @(u.machine) : @"unknown";
     char build[64] = {0};
     size_t len = sizeof(build);
     NSString *buildStr = (sysctlbyname("kern.osversion", build, &len, NULL, 0) == 0) ? @(build) : nil;
@@ -51,18 +52,30 @@ UIView *wq_wrapping_footer(NSString *text, CGFloat horizontalInset)
     return view;
 }
 
-// A small centered label with the device/iOS line, for a table header.
+// "WQ Files 0.9.4 (66)": in the strip, so screenshots show the version.
+NSString *wq_app_version_line(void)
+{
+    NSDictionary *info = NSBundle.mainBundle.infoDictionary;
+    return [NSString stringWithFormat:@"WQ Files %@ (%@)", info[@"CFBundleShortVersionString"] ?: @"?", info[@"CFBundleVersion"] ?: @"?"];
+}
+
+const CGFloat kWQDeviceStripHeight = 46;
+
+// A small centered strip with the WQ Files version and the device/iOS line,
+// for a table header.
 UIView *wq_device_header(CGFloat width)
 {
-    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, 50)];
+    UIView *box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, width, kWQDeviceStripHeight + 16)];
     UILabel *header = [UILabel new];
-    header.numberOfLines = 0;
+    header.numberOfLines = 2;
     header.textAlignment = NSTextAlignmentCenter;
     header.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightMedium];
     header.textColor = UIColor.secondaryLabelColor;
     header.backgroundColor = UIColor.secondarySystemBackgroundColor;
-    header.text = wq_device_line();
-    header.frame = CGRectMake(0, 0, width, 34);
+    header.adjustsFontSizeToFitWidth = YES;   // keeps both lines on narrow screens
+    header.minimumScaleFactor = 0.8;
+    header.text = [NSString stringWithFormat:@"%@\n%@", wq_app_version_line(), wq_device_line()];
+    header.frame = CGRectMake(0, 0, width, kWQDeviceStripHeight);
     header.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [box addSubview:header];  // 16 pt of clear space below the strip
     return box;
@@ -122,14 +135,31 @@ static UIImage *wq_real_icon(NSString *bundleID)
 // The icon from the app's own bundle, for when iOS only hands out its
 // placeholder (iOS 26 refuses this app's icon requests). Reads the primary
 // icon names from Info.plist and loads the matching PNG files.
+// The first few outcomes go to the Log, to see why icons are missing.
+static void wq_icon_note(NSString *bundleID, NSString *what)
+{
+    static NSUInteger notes;
+    @synchronized (NSNull.null) {
+        if (notes >= 8) return;
+        notes++;
+    }
+    wq_log(@"icon: %@: %@", bundleID, what);
+}
+
 static UIImage *wq_bundle_icon(NSString *bundleID)
 {
     NSString *path = wq_bundle_path_for_id(bundleID);
-    if (!path.length) return nil;
+    if (!path.length) { wq_icon_note(bundleID, @"no bundle path in the app database"); return nil; }
     NSString *plistPath = [path stringByAppendingPathComponent:@"Info.plist"];
     NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
     if (!info && wq_grant(path)) info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-    if (![info isKindOfClass:NSDictionary.class]) return nil;
+    if (![info isKindOfClass:NSDictionary.class]) {
+        int fd = open(plistPath.fileSystemRepresentation, O_RDONLY);
+        int err = fd < 0 ? errno : 0;
+        if (fd >= 0) close(fd);
+        wq_icon_note(bundleID, [NSString stringWithFormat:@"can't read %@ (%s)", plistPath, err ? strerror(err) : "not a plist"]);
+        return nil;
+    }
     NSMutableArray<NSString *> *names = [NSMutableArray new];
     for (NSString *key in @[@"CFBundleIcons", @"CFBundleIcons~ipad"]) {
         NSDictionary *primary = [info[key] isKindOfClass:NSDictionary.class] ? info[key][@"CFBundlePrimaryIcon"] : nil;
@@ -147,9 +177,14 @@ static UIImage *wq_bundle_icon(NSString *bundleID)
         NSString *base = name.stringByDeletingPathExtension;
         for (NSString *suffix in @[@"@3x.png", @"@2x.png", @"@2x~ipad.png", @"~ipad.png", @".png"]) {
             UIImage *image = [UIImage imageWithContentsOfFile:[path stringByAppendingPathComponent:[base stringByAppendingString:suffix]]];
-            if (image.CGImage) return image;
+            if (image.CGImage) {
+                wq_icon_note(bundleID, [NSString stringWithFormat:@"loaded %@%@ from the app", base, suffix]);
+                return image;
+            }
         }
     }
+    wq_icon_note(bundleID, [NSString stringWithFormat:@"no icon PNG in %@ (tried %@)", path.lastPathComponent,
+                            [names componentsJoinedByString:@", "]]);
     return nil;
 }
 
@@ -263,7 +298,9 @@ UIImage *wq_app_icon(NSString *bundleID)
     // main thread. Lists warm the cache from their background passes; a
     // main-thread miss gets the tile without caching it.
     BOOL background = !NSThread.isMainThread;
-    UIImage *raw = wq_real_icon(bundleID) ?: (background ? wq_bundle_icon(bundleID) : nil);
+    UIImage *system = wq_real_icon(bundleID);
+    if (system && background) wq_icon_note(bundleID, @"iOS returned an icon");
+    UIImage *raw = system ?: (background ? wq_bundle_icon(bundleID) : nil);
     NSArray *parts = [bundleID componentsSeparatedByString:@"."];
     for (NSInteger n = (NSInteger)parts.count - 1; !raw && n >= 3; n--)
     {
@@ -283,6 +320,52 @@ dispatch_queue_t wq_io(void)
     return queue;
 }
 
+static NSString *const kWQDeletingDisabledPref = @"WQDeletingDisabled";
+
+BOOL wq_deleting_allowed(void)
+{
+    return ![NSUserDefaults.standardUserDefaults boolForKey:kWQDeletingDisabledPref];
+}
+
+void wq_set_deleting_allowed(BOOL allowed)
+{
+    [NSUserDefaults.standardUserDefaults setBool:!allowed forKey:kWQDeletingDisabledPref];
+}
+
+static NSString *const kWQDiscardBeforeRestorePref = @"WQDiscardBeforeRestore";
+
+BOOL wq_keep_before_restore(void)
+{
+    return ![NSUserDefaults.standardUserDefaults boolForKey:kWQDiscardBeforeRestorePref];
+}
+
+void wq_set_keep_before_restore(BOOL keep)
+{
+    [NSUserDefaults.standardUserDefaults setBool:!keep forKey:kWQDiscardBeforeRestorePref];
+}
+
+BOOL wq_refuse_if_deleting_off(UIViewController *host)
+{
+    if (wq_deleting_allowed()) return NO;
+    UIAlertController *alert = wq_alert_controller(@"Deleting is turned off",
+        @"Turn on Allow Deleting on the start screen of WQ Files to delete, clear or clean.", UIAlertControllerStyleAlert);
+    [alert addAction:wq_alert_action(@"OK", UIAlertActionStyleDefault, nil)];
+    [host presentViewController:alert animated:YES completion:nil];
+    return YES;
+}
+
+UIAlertController *wq_alert_controller(NSString *title, NSString *message, UIAlertControllerStyle style)
+{
+    return [UIAlertController alertControllerWithTitle:WQLocalizedNullable(title)
+                                               message:WQLocalizedNullable(message)
+                                        preferredStyle:style];
+}
+
+UIAlertAction *wq_alert_action(NSString *title, UIAlertActionStyle style, void (^handler)(UIAlertAction *))
+{
+    return [UIAlertAction actionWithTitle:WQLocalized(title) style:style handler:handler];
+}
+
 void wq_alert(UIViewController *host, NSString *title, NSString *message)
 {
     if (!host || !host.isViewLoaded || !host.view.window) return;
@@ -291,9 +374,8 @@ void wq_alert(UIViewController *host, NSString *title, NSString *message)
     UINavigationController *nav = host.navigationController;
     if (nav && nav.topViewController != host) return;
     if (host.presentedViewController && !host.presentedViewController.isBeingDismissed) return;
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+    UIAlertController *alert = wq_alert_controller(title, message, UIAlertControllerStyleAlert);
+    [alert addAction:wq_alert_action(@"OK", UIAlertActionStyleDefault, nil)];
     [host presentViewController:alert animated:YES completion:nil];
 }
 

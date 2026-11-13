@@ -52,39 +52,39 @@ static inline BOOL WQAppsSupportManifestFields(NSDictionary *manifest, NSString 
                                         NSArray<NSString *> **partsOut, NSString **errorOut)
 {
     if (![manifest isKindOfClass:NSDictionary.class]) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单不是字典");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest is not a dictionary");
     }
     if (!WQAppsSupportIsBool(manifest[@"Complete"]) || ![manifest[@"Complete"] boolValue]) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单未标记为完整");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest is not marked complete");
     }
     if (!WQAppsSupportIsInteger(manifest[@"Format"]) || [manifest[@"Format"] unsignedIntegerValue] != 1) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单格式不受支持");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest format is unsupported");
     }
     if (![manifest[@"BundleID"] isKindOfClass:NSString.class] ||
         ![(NSString *)manifest[@"BundleID"] length] ||
         ![(NSString *)manifest[@"BundleID"] isEqualToString:bundleID]) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单属于另一个应用");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest belongs to another app");
     }
     if (![manifest[@"Created"] isKindOfClass:NSDate.class]) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单没有有效的创建时间戳");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest has no valid creation timestamp");
     }
     id reason = manifest[@"Reason"];
     if (reason && ![reason isKindOfClass:NSString.class]) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单的原因字段格式不正确");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest reason is malformed");
     }
     id sequence = manifest[@"Sequence"];
     if (sequence && (!WQAppsSupportIsInteger(sequence) || [sequence compare:@1] == NSOrderedAscending)) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单的序号字段格式不正确");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest sequence is malformed");
     }
     NSArray *parts = manifest[@"Parts"];
     if (![parts isKindOfClass:NSArray.class]) {
-        return WQAppsSupportManifestFailure(errorOut, @"备份清单的部分字段格式不正确");
+        return WQAppsSupportManifestFailure(errorOut, @"The backup manifest parts are malformed");
     }
     NSSet *allowed = [NSSet setWithObjects:@"Documents", @"Library", nil];
     NSMutableSet *seen = [NSMutableSet setWithCapacity:parts.count];
     for (id part in parts) {
         if (![part isKindOfClass:NSString.class] || ![allowed containsObject:part] || [seen containsObject:part]) {
-            return WQAppsSupportManifestFailure(errorOut, @"备份清单包含无效或重复的部分");
+            return WQAppsSupportManifestFailure(errorOut, @"The backup manifest contains an invalid or duplicate part");
         }
         [seen addObject:part];
     }
@@ -94,17 +94,17 @@ static inline BOOL WQAppsSupportManifestFields(NSDictionary *manifest, NSString 
     id hashes = manifest[@"PartHashes"];
     if (hashes) {
         if (![hashes isKindOfClass:NSDictionary.class]) {
-            return WQAppsSupportManifestFailure(errorOut, @"备份清单的哈希字段格式不正确");
+            return WQAppsSupportManifestFailure(errorOut, @"The backup manifest hashes are malformed");
         }
         NSDictionary *partHashes = hashes;
         if (![[NSSet setWithArray:partHashes.allKeys] isEqualToSet:seen]) {
-            return WQAppsSupportManifestFailure(errorOut, @"备份清单的哈希与其部分不匹配");
+            return WQAppsSupportManifestFailure(errorOut, @"The backup manifest hashes do not match its parts");
         }
         for (id key in partHashes) {
             id hash = partHashes[key];
             if (![key isKindOfClass:NSString.class] || ![allowed containsObject:key] ||
                 ![hash isKindOfClass:NSString.class] || ![hash length]) {
-                return WQAppsSupportManifestFailure(errorOut, @"备份清单包含无效的部分哈希");
+                return WQAppsSupportManifestFailure(errorOut, @"The backup manifest has an invalid part hash");
             }
         }
     }
@@ -125,29 +125,39 @@ static inline void WQAppsSupportHashBlob(CC_SHA256_CTX *ctx, const void *bytes, 
     if (length) CC_SHA256_Update(ctx, bytes, (CC_LONG)length);
 }
 
+// Sockets, FIFOs and device files: wq_copy_contents leaves them out (they
+// hold no data), so they are not part of the supported tree either.
+static inline BOOL WQAppsSupportIsUnsupportedSpecial(mode_t mode)
+{
+    return S_ISSOCK(mode) || S_ISFIFO(mode) || S_ISCHR(mode) || S_ISBLK(mode);
+}
+
 // Deterministic SHA-256 over length-prefixed tree metadata. `includeIdentity`
 // adds inode/mtime/ctime for source-stability checks; the shape variant omits
 // them and is suitable for comparing a source with its copy. A digest keeps
 // memory bounded and makes filenames containing delimiters unambiguous.
-static inline NSString *WQAppsSupportTreeSignature(NSString *path, BOOL includeIdentity,
-                                                   BOOL *exists, NSString **errorOut)
+// Unsupported special entries (see above) are left out of both variants and
+// counted in *omitted, so a source and its copy describe the same tree.
+static inline NSString *WQAppsSupportTreeSignatureOmitting(NSString *path, BOOL includeIdentity,
+                                                           BOOL *exists, NSUInteger *omitted, NSString **errorOut)
 {
+    if (omitted) *omitted = 0;
     struct stat rootStat;
     if (lstat(path.fileSystemRepresentation, &rootStat) != 0) {
         if (errno == ENOENT) {
             if (exists) *exists = NO;
-            return @"<缺失>";
+            return @"<missing>";
         }
-        if (errorOut) *errorOut = [NSString stringWithFormat:@"无法检查 %@", path.lastPathComponent];
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot inspect %@", path.lastPathComponent];
         return nil;
     }
     if (!S_ISDIR(rootStat.st_mode)) {
-        if (errorOut) *errorOut = [NSString stringWithFormat:@"%@ 不是目录", path.lastPathComponent];
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"%@ is not a directory", path.lastPathComponent];
         return nil;
     }
     NSError *listError = nil;
     if (![NSFileManager.defaultManager contentsOfDirectoryAtPath:path error:&listError]) {
-        if (errorOut) *errorOut = listError.localizedDescription ?: [NSString stringWithFormat:@"无法读取 %@", path.lastPathComponent];
+        if (errorOut) *errorOut = listError.localizedDescription ?: [NSString stringWithFormat:@"Cannot read %@", path.lastPathComponent];
         return nil;
     }
     if (exists) *exists = YES;
@@ -163,14 +173,18 @@ static inline NSString *WQAppsSupportTreeSignature(NSString *path, BOOL includeI
         NSString *item = [path stringByAppendingPathComponent:relative];
         struct stat itemStat;
         if (lstat(item.fileSystemRepresentation, &itemStat) != 0) {
-            if (errorOut) *errorOut = [NSString stringWithFormat:@"无法检查 %@", relative];
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot inspect %@", relative];
             return nil;
+        }
+        if (WQAppsSupportIsUnsupportedSpecial(itemStat.st_mode)) {
+            if (omitted) (*omitted)++;
+            continue;
         }
         unsigned type = (unsigned)(itemStat.st_mode & S_IFMT);
         const char *name = relative.UTF8String;
         NSUInteger nameLength = name ? strlen(name) : 0;
         if (!name) {
-            if (errorOut) *errorOut = [NSString stringWithFormat:@"无法编码 %@", relative];
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot encode %@", relative];
             return nil;
         }
         uint8_t tag = includeIdentity ? 'I' : 'S';
@@ -191,7 +205,7 @@ static inline NSString *WQAppsSupportTreeSignature(NSString *path, BOOL includeI
             char target[PATH_MAX];
             ssize_t length = readlink(item.fileSystemRepresentation, target, sizeof(target) - 1);
             if (length < 0 || length >= (ssize_t)sizeof(target) - 1) {
-                if (errorOut) *errorOut = [NSString stringWithFormat:@"无法检查链接 %@", relative];
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot inspect link %@", relative];
                 return nil;
             }
             WQAppsSupportHashBlob(&ctx, target, (NSUInteger)length);
@@ -204,6 +218,12 @@ static inline NSString *WQAppsSupportTreeSignature(NSString *path, BOOL includeI
     return hex;
 }
 
+static inline NSString *WQAppsSupportTreeSignature(NSString *path, BOOL includeIdentity,
+                                                   BOOL *exists, NSString **errorOut)
+{
+    return WQAppsSupportTreeSignatureOmitting(path, includeIdentity, exists, NULL, errorOut);
+}
+
 // Content-level digest for backup verification: metadata plus every regular
 // file's bytes. Reading is streamed; a file that changes while it is hashed
 // fails with an error rather than producing a torn digest.
@@ -213,18 +233,18 @@ static inline NSString *WQAppsSupportTreeContentSignature(NSString *path, BOOL *
     if (lstat(path.fileSystemRepresentation, &rootStat) != 0) {
         if (errno == ENOENT) {
             if (exists) *exists = NO;
-            return @"<缺失>";
+            return @"<missing>";
         }
-        if (errorOut) *errorOut = [NSString stringWithFormat:@"无法检查 %@", path.lastPathComponent];
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot inspect %@", path.lastPathComponent];
         return nil;
     }
     if (!S_ISDIR(rootStat.st_mode)) {
-        if (errorOut) *errorOut = [NSString stringWithFormat:@"%@ 不是目录", path.lastPathComponent];
+        if (errorOut) *errorOut = [NSString stringWithFormat:@"%@ is not a directory", path.lastPathComponent];
         return nil;
     }
     NSError *listError = nil;
     if (![NSFileManager.defaultManager contentsOfDirectoryAtPath:path error:&listError]) {
-        if (errorOut) *errorOut = listError.localizedDescription ?: [NSString stringWithFormat:@"无法读取 %@", path.lastPathComponent];
+        if (errorOut) *errorOut = listError.localizedDescription ?: [NSString stringWithFormat:@"Cannot read %@", path.lastPathComponent];
         return nil;
     }
     if (exists) *exists = YES;
@@ -241,12 +261,12 @@ static inline NSString *WQAppsSupportTreeContentSignature(NSString *path, BOOL *
         NSString *item = [path stringByAppendingPathComponent:relative];
         struct stat itemStat;
         if (lstat(item.fileSystemRepresentation, &itemStat) != 0) {
-            if (errorOut) *errorOut = [NSString stringWithFormat:@"无法检查 %@", relative];
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot inspect %@", relative];
             return nil;
         }
         const char *name = relative.UTF8String;
         if (!name) {
-            if (errorOut) *errorOut = [NSString stringWithFormat:@"无法编码 %@", relative];
+            if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot encode %@", relative];
             return nil;
         }
         uint8_t tag = 'C';
@@ -258,7 +278,7 @@ static inline NSString *WQAppsSupportTreeContentSignature(NSString *path, BOOL *
         if (S_ISREG(itemStat.st_mode)) {
             int fd = open(item.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
             if (fd < 0) {
-                if (errorOut) *errorOut = [NSString stringWithFormat:@"无法读取 %@", relative];
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot read %@", relative];
                 return nil;
             }
             struct stat after;
@@ -285,7 +305,7 @@ static inline NSString *WQAppsSupportTreeContentSignature(NSString *path, BOOL *
             int err = errno;
             close(fd);
             if (!ok) {
-                if (errorOut) *errorOut = [NSString stringWithFormat:@"%@ 在读取时发生了变化", relative];
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"%@ changed while it was read", relative];
                 errno = err;
                 return nil;
             }
@@ -293,7 +313,7 @@ static inline NSString *WQAppsSupportTreeContentSignature(NSString *path, BOOL *
             char target[PATH_MAX];
             ssize_t length = readlink(item.fileSystemRepresentation, target, sizeof(target) - 1);
             if (length < 0 || length >= (ssize_t)sizeof(target) - 1) {
-                if (errorOut) *errorOut = [NSString stringWithFormat:@"无法检查链接 %@", relative];
+                if (errorOut) *errorOut = [NSString stringWithFormat:@"Cannot inspect link %@", relative];
                 return nil;
             }
             WQAppsSupportHashBlob(&ctx, target, (NSUInteger)length);
@@ -356,12 +376,96 @@ static inline WQAppsSupportJournalState WQAppsSupportJournalStateForDictionary(N
 static inline BOOL WQAppsSupportJournalAllowsNewRestore(WQAppsSupportJournalState state, NSString **error)
 {
     if (state == WQAppsSupportJournalActive) {
-        if (error) *error = @"有一个被中断的恢复仍在进行。开始新的恢复前，请先恢复或放弃它";
+        if (error) *error = @"An interrupted restore is still active. Recover or discard it before starting another restore";
         return NO;
     }
     if (state == WQAppsSupportJournalUnknown) {
-        if (error) *error = @"现有的恢复日志状态未知";
+        if (error) *error = @"The existing restore recovery journal has an unknown state";
         return NO;
     }
     return YES;
+}
+
+#pragma mark - Import as Backup
+
+// The folder inside an import that holds Documents and/or Library: the
+// picked folder itself, or the shallowest one below it (a shared backup ZIP
+// or another tool's export usually wraps them in a folder). Several at the
+// same depth are ambiguous.
+static inline NSString *WQAppsSupportImportRoot(NSString *dir, NSString **error)
+{
+    NSFileManager *fm = NSFileManager.defaultManager;
+    NSArray<NSString *> *level = @[dir];
+    for (int depth = 0; depth <= 3 && level.count; depth++) {
+        NSMutableArray<NSString *> *found = [NSMutableArray new], *next = [NSMutableArray new];
+        for (NSString *candidate in level) {
+            BOOL has = NO;
+            for (NSString *part in @[@"Documents", @"Library"]) {
+                struct stat st;
+                if (lstat([candidate stringByAppendingPathComponent:part].fileSystemRepresentation, &st) == 0 && S_ISDIR(st.st_mode))
+                    has = YES;
+            }
+            if (has) { [found addObject:candidate]; continue; }
+            for (NSString *name in [[fm contentsOfDirectoryAtPath:candidate error:nil] sortedArrayUsingSelector:@selector(compare:)]) {
+                if ([name hasPrefix:@"."] || [name isEqualToString:@"__MACOSX"]) continue;
+                NSString *child = [candidate stringByAppendingPathComponent:name];
+                struct stat st;
+                if (lstat(child.fileSystemRepresentation, &st) == 0 && S_ISDIR(st.st_mode)) [next addObject:child];
+            }
+        }
+        if (found.count == 1) return found.firstObject;
+        if (found.count > 1) {
+            NSMutableArray *names = [NSMutableArray new];
+            for (NSString *f in found) [names addObject:[f substringFromIndex:MIN(dir.length + 1, f.length)]];
+            if (error) *error = [NSString stringWithFormat:NSLocalizedString(@"It holds data of several apps (%@). Pick one of these folders instead.", nil),
+                                 [names componentsJoinedByString:@", "]];
+            return nil;
+        }
+        level = next;
+    }
+    if (error) *error = NSLocalizedString(@"No Documents or Library folder was found in it.", nil);
+    return nil;
+}
+
+// Every bundle ID the imported data says it belongs to: a WQ Files backup's
+// checklist and a container's metadata file, in that order, without
+// duplicates. A declaration that is present but not a valid bundle ID is
+// returned in *invalid (as text) instead; callers refuse such data.
+static inline NSArray<NSString *> *WQAppsSupportImportDeclaredBundles(NSString *root, NSString **invalid)
+{
+    if (invalid) *invalid = nil;
+    NSMutableArray<NSString *> *ids = [NSMutableArray new];
+    NSArray *sources = @[@[@".wqbackup.plist", @"BundleID"],
+                         @[@".com.apple.mobile_container_manager.metadata.plist", @"MCMMetadataIdentifier"]];
+    for (NSArray *source in sources) {
+        NSString *file = [root stringByAppendingPathComponent:source[0]];
+        struct stat st;
+        if (lstat(file.fileSystemRepresentation, &st) != 0) continue;   // not declared
+        NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:file];
+        id value = [plist isKindOfClass:NSDictionary.class] ? plist[source[1]] : nil;
+        if (!value) continue;   // a file without this key declares nothing
+        if (!WQAppsSupportBundleIDValid(value)) {
+            if (invalid && !*invalid) *invalid = [value isKindOfClass:NSString.class] ? value : [value description];
+            continue;
+        }
+        if (![ids containsObject:value]) [ids addObject:value];
+    }
+    return ids;
+}
+
+// The first declared bundle ID, if any (see WQAppsSupportImportDeclaredBundles).
+static inline NSString *WQAppsSupportImportDeclaredBundle(NSString *root)
+{
+    return WQAppsSupportImportDeclaredBundles(root, NULL).firstObject;
+}
+
+// Items next to Documents/Library that an import leaves out.
+static inline NSArray<NSString *> *WQAppsSupportImportIgnored(NSString *root)
+{
+    NSMutableArray *ignored = [NSMutableArray new];
+    for (NSString *name in [[NSFileManager.defaultManager contentsOfDirectoryAtPath:root error:nil] sortedArrayUsingSelector:@selector(compare:)]) {
+        if ([@[@"Documents", @"Library", @".wqbackup.plist", @".com.apple.mobile_container_manager.metadata.plist", @".DS_Store"] containsObject:name]) continue;
+        [ignored addObject:name];
+    }
+    return ignored;
 }

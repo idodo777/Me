@@ -15,6 +15,7 @@
 #import "WQAccess.h"
 #import "WQCore.h"
 #import "WQAccessSafety.h"
+#import "WQLocalization.h"
 #import <dlfcn.h>
 #import <objc/message.h>
 #import <dirent.h>
@@ -98,7 +99,7 @@ NSString *wq_app_group(void)
             if (root) {
                 group = candidate;
                 if (!WQRecoverCacheSwapAtPath([root.path stringByAppendingPathComponent:@"Library"]))
-                    wq_log(@"应用组缓存恢复需要处理；保留的内容在：%@（%@）", root.path, wq_errno(errno));
+                    wq_log(@"App-group cache recovery requires attention; preserved contents retained: %@ (%@)", root.path, wq_errno(errno));
                 break;
             }
         }
@@ -214,6 +215,37 @@ static int64_t wq_query(NSString *target, BOOL altFlags)
     return handle;
 }
 
+BOOL wq_reset_access_cache(NSString **errorText)
+{
+    NSString *group = wq_app_group();
+    NSURL *root = group ? [NSFileManager.defaultManager containerURLForSecurityApplicationGroupIdentifier:group] : nil;
+    if (!root) { if (errorText) *errorText = WQLocalized(@"The App Group is missing."); return NO; }
+    NSString *libraryPath = [root.path stringByAppendingPathComponent:@"Library"];
+    [NSFileManager.defaultManager createDirectoryAtPath:libraryPath withIntermediateDirectories:YES attributes:nil error:nil];
+    int library = WQOpenDirectoryNoLinks(libraryPath);
+    if (library < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
+    NSMutableArray<NSString *> *done = [NSMutableArray new];
+    // Unlike token requests, repair moves a non-regular lock aside first.
+    int lock = WQCacheLockOpenForRepair(library, done);
+    if (lock < 0 || flock(lock, LOCK_EX | LOCK_NB) != 0) {
+        int err = errno;
+        if (lock >= 0) close(lock);
+        close(library);
+        wq_log(@"access cache reset in %@: lock unavailable (%@)%@", libraryPath, wq_errno(err),
+               done.count ? [@"; " stringByAppendingString:[done componentsJoinedByString:@", "]] : @"");
+        if (errorText) *errorText = wq_errno(err);
+        return NO;
+    }
+    BOOL ok = WQCacheSwapReset(library, done);
+    int err = errno;
+    close(lock);
+    close(library);
+    wq_log(@"access cache reset in %@: %@%@", libraryPath, done.count ? [done componentsJoinedByString:@", "] : @"nothing to repair",
+           ok ? @"" : [@"; FAILED: " stringByAppendingString:wq_errno(err)]);
+    if (!ok && errorText) *errorText = wq_errno(err);
+    return ok;
+}
+
 static NSMutableDictionary<NSString *, NSNumber *> *gGrants;
 static NSMutableArray<NSString *> *gGrantOrder;   // oldest first
 // The kernel limits how many sandbox extensions a process may hold. Keep a
@@ -305,10 +337,13 @@ BOOL wq_grant(NSString *path)
             usedAlt = !altFirst;
         }
     }
-    if (handle >= 0 && preferAlt != (int)usedAlt) {
-        if (preferAlt >= 0 || usedAlt != !wq_system_areas_reachable())
-            wq_log(@"grant: the %@ query flags work on this device", usedAlt ? @"alternative" : @"standard");
+    // Decided once, by the first grant that works: some targets refuse to
+    // open for their own reasons, and a per-target fallback already covers
+    // the rest, so flipping the preference back and forth only costs queries.
+    if (handle >= 0 && preferAlt < 0) {
         preferAlt = usedAlt;
+        if (usedAlt != !wq_system_areas_reachable())
+            wq_log(@"grant: the %@ query flags work on this device", usedAlt ? @"alternative" : @"standard");
     }
     if (handle >= 0) {  // failures are retried next time
         gGrants[key] = @(handle);
@@ -329,6 +364,7 @@ static int64_t wq_test_volume_limit = -1;
 static void (^wq_test_mutation_hook)(NSString *stage, NSString *path);
 static void (^wq_test_tree_hook)(NSString *stage, NSString *path);
 static void (^wq_test_stream_hook)(NSString *stage, NSString *path);
+static NSDictionary<NSString *, NSArray<NSString *> *> *(^wq_test_shared_scan_runner)(BOOL inodeOnly);
 #define WQ_TREE_HOOK(stage, path) do { if (wq_test_tree_hook) wq_test_tree_hook(stage, path); } while (0)
 #define WQ_MUTATION_HOOK(stage, path) do { if (wq_test_mutation_hook) wq_test_mutation_hook(stage, path); } while (0)
 #define WQ_STREAM_HOOK(stage, path) do { if (wq_test_stream_hook) wq_test_stream_hook(stage, path); } while (0)
@@ -378,7 +414,7 @@ static BOOL wq_stream(int in, int out, NSString **errorText)
 {
     static const size_t kChunk = 1 << 20;
     uint8_t *buf = malloc(kChunk);
-    if (!buf) { if (errorText) *errorText = @"内存不足"; return NO; }
+    if (!buf) { if (errorText) *errorText = WQLocalized(@"Out of memory"); return NO; }
     BOOL ok = YES;
     for (;;) {
         ssize_t n = read(in, buf, kChunk);
@@ -400,16 +436,9 @@ static BOOL wq_stream(int in, int out, NSString **errorText)
 
 // Always durable, including own files. Safety artifacts themselves are protected
 // from generic overwrite/delete: recursively backing up Backups is unbounded.
-static BOOL wq_backup_fd(NSString *path, int fd, NSString **backupPath, NSString **errorText)
+// A new backup unit name: "20261111-175959-512-1".
+static NSString *wq_new_backup_stamp(void)
 {
-    if (errorText) *errorText = nil;
-    NSString *original = WQCanonicalVarPath(path);
-    NSString *root = WQCanonicalVarPath(wq_backup_root());
-    if (!WQAbsolutePathGrammar(original) || wq_is_backup_storage_path(original)) {
-        wq_log(@"backup: refusing invalid path or mutation of backup storage: %@", path);
-        if (errorText) *errorText = @"路径无效或属于备份存储。";
-        return NO;
-    }
     static NSDateFormatter *fmt;
     static uint64_t counter;
     static NSLock *lock;
@@ -425,8 +454,24 @@ static BOOL wq_backup_fd(NSString *path, int fd, NSString **backupPath, NSString
     NSString *stamp = counter == UINT64_MAX ? nil :
         [NSString stringWithFormat:@"%@-%llu", [fmt stringFromDate:NSDate.date], (unsigned long long)++counter];
     [lock unlock];
+    return stamp;
+}
+
+// Backs up the open file into Backups/<stamp>/<original path>. `unitStamp`
+// puts several files into one unit (a deleted folder); nil makes a new one.
+static BOOL wq_backup_fd(NSString *path, int fd, NSString *unitStamp, NSString **backupPath, NSString **errorText)
+{
+    if (errorText) *errorText = nil;
+    NSString *original = WQCanonicalVarPath(path);
+    NSString *root = WQCanonicalVarPath(wq_backup_root());
+    if (!WQAbsolutePathGrammar(original) || wq_is_backup_storage_path(original)) {
+        wq_log(@"backup: refusing invalid path or mutation of backup storage: %@", path);
+        if (errorText) *errorText = WQLocalized(@"The path is invalid or belongs to backup storage.");
+        return NO;
+    }
+    NSString *stamp = unitStamp ?: wq_new_backup_stamp();
     if (!stamp) {
-        if (errorText) *errorText = @"无法分配备份名称。";
+        if (errorText) *errorText = WQLocalized(@"Cannot allocate a backup name.");
         return NO;
     }
     NSString *dest = [[root stringByAppendingPathComponent:stamp] stringByAppendingString:original];
@@ -462,7 +507,7 @@ static BOOL wq_backup_fd(NSString *path, int fd, NSString **backupPath, NSString
         if (fstat(fd, &sourceStat) == 0 && fstatfs(parent, &space) == 0) {
             unsigned long long available = (unsigned long long)space.f_bavail * (unsigned long long)space.f_bsize;
             if ((unsigned long long)sourceStat.st_size > available) {
-                error = @"可用空间不足，无法完整备份";
+                error = WQLocalized(@"Not enough free space for a full backup copy");
                 wq_log(@"backup: %@ (%@)", path, error);
                 if (errorText) *errorText = error;
                 close(parent);
@@ -484,7 +529,7 @@ static BOOL wq_backup_fd(NSString *path, int fd, NSString **backupPath, NSString
     close(parent);
     wq_log(@"backup: %@ -> %@", path, ok ? dest : error ?: @"FAILED");
     if (ok && backupPath) *backupPath = dest;
-    if (!ok && errorText) *errorText = error ?: @"备份拷贝失败。";
+    if (!ok && errorText) *errorText = error ?: WQLocalized(@"Backup copy failed.");
     return ok;
 }
 
@@ -521,7 +566,7 @@ NSDictionary<NSString *, NSNumber *> *wq_file_version(NSString *path)
 
 static BOOL wq_changed(NSString **errorText)
 {
-    if (errorText) *errorText = @"文件在打开后发生了变化。你的修改未写入；请重新打开并比较更改。";
+    if (errorText) *errorText = WQLocalized(@"The file changed after it was opened. Your edits were not written; reopen it and compare the changes.");
     return NO;
 }
 
@@ -557,9 +602,9 @@ static BOOL wq_mutation_current(NSString *path, WQMutation *mutation, BOOL versi
 static BOOL wq_mutation_open(NSString *path, NSDictionary *expected, WQMutation *mutation, int flags, NSString **errorText)
 {
     *mutation = (WQMutation){ .fd = -1, .parent = -1 };
-    if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path))) { if (errorText) *errorText = @"文件路径无效"; return NO; }
+    if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path))) { if (errorText) *errorText = WQLocalized(@"Invalid file path"); return NO; }
     if (wq_is_backup_storage_path(path)) {
-        if (errorText) *errorText = @"备份存储不能通过文件浏览器覆盖或删除。";
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be overwritten or deleted through the file browser.");
         return NO;
     }
     NSString *parent = path.stringByDeletingLastPathComponent;
@@ -590,17 +635,21 @@ static BOOL wq_mutation_open(NSString *path, NSDictionary *expected, WQMutation 
     return YES;
 }
 
-static BOOL wq_mutation_backup(NSString *path, WQMutation *mutation, NSString **backup, NSString **errorText)
+static BOOL wq_mutation_backup_into(NSString *path, WQMutation *mutation, NSString *unitStamp, NSString **backup, NSString **errorText)
 {
     if (!wq_mutation_current(path, mutation, YES, errorText)) return NO;
     NSString *backupError = nil;
-    if (!wq_backup_fd(path, mutation->fd, backup, &backupError)) {
-        if (errorText) *errorText = [NSString stringWithFormat:@"Backup of the current file failed, nothing was written: %@",
-                                     backupError ?: @"unknown error"];
+    if (!wq_backup_fd(path, mutation->fd, unitStamp, backup, &backupError)) {
+        if (errorText) *errorText = WQLocalizedFormat(@"Backup of the current file failed, nothing was written: %@", backupError ?: WQLocalized(@"unknown error"));
         return NO;
     }
     WQ_MUTATION_HOOK(@"backedUp", path);
     return wq_mutation_current(path, mutation, YES, errorText);
+}
+
+static BOOL wq_mutation_backup(NSString *path, WQMutation *mutation, NSString **backup, NSString **errorText)
+{
+    return wq_mutation_backup_into(path, mutation, nil, backup, errorText);
 }
 
 static BOOL wq_restore_backup_fd(WQMutation *mutation, NSString *backup, NSString **errorText)
@@ -677,29 +726,29 @@ static BOOL wq_mutation_finish(NSString *path, WQMutation *mutation, NSString *b
     if (ok && fsync(mutation->fd) != 0) { ok = NO; failure = wq_errno(errno); }
     WQ_MUTATION_HOOK(@"written", path);
     if (ok && !wq_mutation_current(path, mutation, NO, errorText)) {
-        ok = NO; failure = @"写入期间目标路径被替换";
+        ok = NO; failure = WQLocalized(@"The target path was replaced during writing");
     }
     if (ok && (expectedData || expectedRuns)) {
         verifiedVersion = wq_verified_saved_version(mutation, expectedData, expectedRuns);
         if (!verifiedVersion || !wq_mutation_current(path, mutation, NO, errorText)) {
             ok = NO;
             rollbackAllowed = NO; // A concurrent writer may own the newer contents.
-            failure = @"保存的内容无法验证；可能存在并发修改";
+            failure = WQLocalized(@"Saved contents could not be verified; possible concurrent modification");
         }
     }
     if (!ok) {
         NSString *rollbackError = nil;
         BOOL restored = rollbackAllowed && backup && wq_restore_backup_fd(mutation, backup, &rollbackError);
-        if (errorText) *errorText = [NSString stringWithFormat:@"%@；%@。备份：%@", failure ?: @"写入失败",
+        if (errorText) *errorText = [NSString stringWithFormat:@"%@; %@. Backup: %@", failure ?: WQLocalized(@"Write failed"),
             restored ? @"the original descriptor contents were restored" :
-            (rollbackAllowed ? [@"rollback failed: " stringByAppendingString:rollbackError ?: @"unknown error"] :
+            (rollbackAllowed ? [@"rollback failed: " stringByAppendingString:rollbackError ?: WQLocalized(@"unknown error")] :
              @"no rollback was attempted to avoid overwriting concurrent changes"), backup ?: @"none"];
     }
     // Rollback must finish before close releases the lock. A close failure has
     // no safe reopen/rollback path; retain the durable backup and report it.
     if (close(mutation->fd) != 0 && ok) {
         ok = NO;
-        if (errorText) *errorText = [NSString stringWithFormat:@"关闭失败：%@。备份：%@", wq_errno(errno), backup];
+        if (errorText) *errorText = WQLocalizedFormat(@"Close failed: %@. Backup: %@", wq_errno(errno), backup);
     }
     mutation->fd = -1;
     wq_mutation_close(mutation);
@@ -712,7 +761,15 @@ NSArray<NSString *> *wq_list(NSString *dir, NSString **errorText)
     NSError *error = nil;
     NSArray *items = [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:&error];
     if (!items && wq_grant(dir)) items = [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:&error];
-    if (!items && errorText) *errorText = error.localizedDescription ?: @"无法列出此文件夹";
+    if (!items && errorText) *errorText = error.localizedDescription ?: WQLocalized(@"Cannot list this folder");
+    if (!items) {
+        // Keep the reason in errno, so callers can tell a refusal from a failure.
+        int err = [error.domain isEqualToString:NSCocoaErrorDomain] && error.code == NSFileReadNoPermissionError ? EACCES : EIO;
+        for (NSError *e = error; e; e = e.userInfo[NSUnderlyingErrorKey]) {
+            if ([e.domain isEqualToString:NSPOSIXErrorDomain] && e.code > 0) { err = (int)e.code; break; }
+        }
+        errno = err;
+    }
     return items;
 }
 
@@ -824,13 +881,19 @@ BOOL wq_write(NSString *path, NSData *data, NSString **errorText)
 
 BOOL wq_write_from_file(NSString *path, NSString *source, NSString **errorText)
 {
+    return wq_write_from_file_with_backup(path, source, NULL, errorText);
+}
+
+BOOL wq_write_from_file_with_backup(NSString *path, NSString *source, NSString **backupUnit, NSString **errorText)
+{
+    if (backupUnit) *backupUnit = nil;
     int in = WQOpenRegularAt(AT_FDCWD, source.fileSystemRepresentation, O_RDONLY, 0);
     if (in < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
     WQMutation mutation;
     if (!wq_mutation_open(path, nil, &mutation, O_RDWR, errorText)) { close(in); return NO; }
     struct stat src;
     if (fstat(in, &src) != 0 || WQSameObject(&src, &mutation.before)) {
-        if (errorText) *errorText = @"源和目标是同一文件";
+        if (errorText) *errorText = WQLocalized(@"Source and destination are the same file");
         close(in); wq_mutation_close(&mutation); return NO;
     }
     NSDictionary *sourceVersion = wq_version_for_stat(&src);
@@ -843,22 +906,58 @@ BOOL wq_write_from_file(NSString *path, NSString *source, NSString **errorText)
     if (ok && (fstat(in, &srcAfter) != 0 ||
                ![sourceVersion isEqualToDictionary:wq_version_for_stat(&srcAfter)])) {
         ok = NO;
-        error = @"拷贝期间源发生了变化";
+        error = WQLocalized(@"The source changed while it was being copied");
     }
     if (!ok && !error) error = wq_errno(errno);
     close(in);
-    return wq_mutation_finish(path, &mutation, backup, ok, error, errorText, nil, nil, nil);
+    BOOL finished = wq_mutation_finish(path, &mutation, backup, ok, error, errorText, nil, nil, nil);
+    if (finished && backupUnit && backup.length) {
+        // Backups/<stamp>/<original path>: the unit is the stamp folder.
+        NSString *root = WQCanonicalVarPath(wq_backup_root());
+        NSString *canonical = WQCanonicalVarPath(backup);
+        if (root.length && [canonical hasPrefix:[root stringByAppendingString:@"/"]]) {
+            NSString *stamp = [[canonical substringFromIndex:root.length + 1] componentsSeparatedByString:@"/"].firstObject;
+            if (stamp.length) *backupUnit = [root stringByAppendingPathComponent:stamp];
+        }
+    }
+    return finished;
+}
+
+BOOL wq_backup_local_copy(NSString *originalPath, NSString *source, NSString **backupUnit, NSString **errorText)
+{
+    NSString *root = WQCanonicalVarPath(wq_backup_root());
+    NSString *stamp = nil;
+    if (*backupUnit) {
+        NSString *unit = WQCanonicalVarPath(*backupUnit);
+        stamp = unit.lastPathComponent;
+        if (!root.length || ![unit isEqualToString:[root stringByAppendingPathComponent:stamp]] || !WQBackupStampValid(stamp)) {
+            if (errorText) *errorText = WQLocalized(@"The path is invalid or belongs to backup storage.");
+            return NO;
+        }
+    } else {
+        stamp = wq_new_backup_stamp();
+        if (!stamp || !root.length) {
+            if (errorText) *errorText = WQLocalized(@"Cannot allocate a backup name.");
+            return NO;
+        }
+    }
+    int in = WQOpenRegularAt(AT_FDCWD, source.fileSystemRepresentation, O_RDONLY, 0);
+    if (in < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
+    BOOL ok = wq_backup_fd(originalPath, in, stamp, NULL, errorText);
+    close(in);
+    if (ok) *backupUnit = [root stringByAppendingPathComponent:stamp];
+    return ok;
 }
 
 BOOL wq_create_file_from(NSString *path, NSString *source, NSString **errorText)
 {
     if (wq_is_backup_storage_path(path)) {
-        if (errorText) *errorText = @"备份存储不能通过文件浏览器修改。";
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be modified through the file browser.");
         return NO;
     }
     NSString *canonical = WQCanonicalVarPath(path);
     if (!WQAbsolutePathGrammar(canonical)) {
-        if (errorText) *errorText = @"文件路径无效";
+        if (errorText) *errorText = WQLocalized(@"Invalid file path");
         return NO;
     }
     int in = WQOpenRegularAt(AT_FDCWD, source.fileSystemRepresentation, O_RDONLY, 0);
@@ -883,7 +982,7 @@ BOOL wq_create_file_from(NSString *path, NSString *source, NSString **errorText)
     if (fstat(in, &srcBefore) != 0) {
         close(fd); close(in); close(parent);
         unlinkat(parent, name, 0);
-        if (errorText) *errorText = @"无法检查拷贝源";
+        if (errorText) *errorText = WQLocalized(@"Cannot inspect the copy source");
         return NO;
     }
     NSDictionary *sourceVersion = wq_version_for_stat(&srcBefore);
@@ -894,7 +993,7 @@ BOOL wq_create_file_from(NSString *path, NSString *source, NSString **errorText)
     if (ok && (fstat(in, &srcAfter) != 0 ||
                ![sourceVersion isEqualToDictionary:wq_version_for_stat(&srcAfter)])) {
         ok = NO;
-        error = @"拷贝期间源发生了变化";
+        error = WQLocalized(@"The source changed while it was being copied");
     }
     close(in);
     if (close(fd) != 0 && ok) { ok = NO; error = wq_errno(errno); }
@@ -909,11 +1008,11 @@ BOOL wq_create_file_from(NSString *path, NSString *source, NSString **errorText)
 BOOL wq_copy_to_local(NSString *path, NSString *dest, NSString **errorText)
 {
     if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path)) || !WQAbsolutePathGrammar(WQCanonicalVarPath(dest))) {
-        if (errorText) *errorText = @"拷贝路径无效";
+        if (errorText) *errorText = WQLocalized(@"Invalid copy path");
         return NO;
     }
     if (wq_is_backup_storage_path(dest)) {
-        if (errorText) *errorText = @"备份存储不能通过文件浏览器修改。";
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be modified through the file browser.");
         return NO;
     }
     int in = wq_open(path, O_RDONLY, 0);
@@ -922,7 +1021,7 @@ BOOL wq_copy_to_local(NSString *path, NSString *dest, NSString **errorText)
     if (fstat(in, &source) != 0) { close(in); return NO; }
     // stat intentionally follows a destination alias for this identity check.
     if (stat(dest.fileSystemRepresentation, &destination) == 0 && WQSameObject(&source, &destination)) {
-        close(in); if (errorText) *errorText = @"源和目标是同一文件"; return NO;
+        close(in); if (errorText) *errorText = WQLocalized(@"Source and destination are the same file"); return NO;
     }
     int parent = WQOpenDirectoryNoLinks(dest.stringByDeletingLastPathComponent);
     if (parent < 0) { if (errorText) *errorText = wq_errno(errno); close(in); return NO; }
@@ -932,19 +1031,19 @@ BOOL wq_copy_to_local(NSString *path, NSString *dest, NSString **errorText)
     BOOL ok = wq_stream(in, out, errorText);
     struct stat after;
     if (ok && (fstat(in, &after) != 0 || ![wq_version_for_stat(&source) isEqualToDictionary:wq_version_for_stat(&after)])) {
-        ok = NO; if (errorText) *errorText = @"拷贝期间源发生了变化";
+        ok = NO; if (errorText) *errorText = WQLocalized(@"The source changed while it was copied");
     }
     close(in);
     if (close(out) != 0 && ok) { ok = NO; if (errorText) *errorText = wq_errno(errno); }
     // Recheck aliases after the potentially long stream, still before replacing.
     if (ok && fstatat(parent, dest.lastPathComponent.fileSystemRepresentation, &destination, 0) == 0 && WQSameObject(&source, &destination)) {
-        ok = NO; if (errorText) *errorText = @"源和目标是同一文件";
+        ok = NO; if (errorText) *errorText = WQLocalized(@"Source and destination are the same file");
     }
     if (ok) {
         struct stat entry;
         if (fstatat(parent, dest.lastPathComponent.fileSystemRepresentation, &entry, AT_SYMLINK_NOFOLLOW) == 0 &&
             !S_ISREG(entry.st_mode) && !S_ISLNK(entry.st_mode)) {
-            ok = NO; if (errorText) *errorText = @"目标不是普通文件";
+            ok = NO; if (errorText) *errorText = WQLocalized(@"Destination is not a regular file");
         }
     }
     if (ok && renameat(parent, stage.fileSystemRepresentation, parent, dest.lastPathComponent.fileSystemRepresentation) != 0) {
@@ -966,9 +1065,8 @@ NSString *wq_permission_hint(NSString *path, BOOL forWriting)
                  : (st.st_gid == getgid() ? (st.st_mode >> 3 & need) != 0 : (st.st_mode & need) != 0);
     if (allowed) return nil;
     NSString *owner = st.st_uid == 0 ? @"root" : [NSString stringWithFormat:@"uid %d", (int)st.st_uid];
-    return [NSString stringWithFormat:@"此文件属于 %@（模式 %o），只有其所有者可以%@它。"
-            "WQ Files reaches the folder, but runs as mobile (uid %d), so no app can %@ this file.",
-            owner, st.st_mode & 07777, forWriting ? @"更改" : @"读取", (int)me, forWriting ? @"更改" : @"打开"];
+    return WQLocalizedFormat(@"This file belongs to %@ (mode %o) and only its owner may %@ it. WQ Files reaches the folder, but runs as mobile (uid %d), so no app can %@ this file.",
+            owner, st.st_mode & 07777, forWriting ? WQLocalized(@"change") : WQLocalized(@"read"), (int)me, forWriting ? WQLocalized(@"change") : WQLocalized(@"open"));
 }
 
 NSData *wq_read_range(NSString *path, unsigned long long offset, NSUInteger length, NSString **errorText)
@@ -998,7 +1096,7 @@ static BOOL wq_patch_checked(NSString *path, NSDictionary<NSNumber *, NSData *> 
     unsigned long long size = (unsigned long long)mutation.before.st_size;
     for (NSNumber *off in runs) {
         if (!WQPatchRangeValid(off.unsignedLongLongValue, runs[off].length, size)) {
-            if (errorText) *errorText = @"更改位置超出文件末尾";
+            if (errorText) *errorText = WQLocalized(@"A change lies past the end of the file");
             wq_mutation_close(&mutation); return NO;
         }
     }
@@ -1054,10 +1152,15 @@ BOOL wq_backup_unit_deletable(NSString *path)
     return NO;
 }
 
+static BOOL wq_purge_root_matches(NSString *path, int fd);
+static BOOL wq_purge_fd(int fd, NSString *path, unsigned long long *freed, WQScanCancellation *cancellation);
+static BOOL wq_entry_is(int dir, const char *name, const struct stat *st);
+static BOOL wq_selection_changed(NSString **errorText);
+
 BOOL wq_delete_backup(NSString *path, NSString **errorText)
 {
     if (!wq_backup_unit_deletable(path)) {
-        if (errorText) *errorText = @"此处只能删除完整的备份单元。";
+        if (errorText) *errorText = WQLocalized(@"Only a complete backup unit can be deleted here.");
         return NO;
     }
     NSString *canonical = WQCanonicalVarPath(path);
@@ -1073,14 +1176,25 @@ BOOL wq_delete_backup(NSString *path, NSString **errorText)
     }
     int rc;
     if (S_ISDIR(st.st_mode)) {
+        // Purge the unit through a descriptor pinned to the examined folder;
+        // a unit replaced meanwhile is left alone.
         unsigned long long ignored = 0;
-        if (!wq_purge_contents_cancellable(canonical, &ignored, nil)) {
-            if (errorText) *errorText = @"无法删除备份内的全部内容。";
+        int unit = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        struct stat unitSt;
+        BOOL same = unit >= 0 && fstat(unit, &unitSt) == 0 && WQSameObject(&unitSt, &st);
+        WQ_TREE_HOOK(@"deleteBackupPurge", canonical);
+        BOOL purged = same && wq_purge_root_matches(canonical, unit) && wq_purge_fd(unit, canonical, &ignored, nil);
+        if (unit >= 0) close(unit);
+        if (!same) { close(parent); return wq_selection_changed(errorText); }
+        if (!purged) {
+            if (errorText) *errorText = WQLocalized(@"Could not remove everything inside the backup.");
             close(parent);
             return NO;
         }
+        if (!wq_entry_is(parent, name, &st)) { close(parent); return wq_selection_changed(errorText); }
         rc = unlinkat(parent, name, AT_REMOVEDIR);
     } else {
+        if (!wq_entry_is(parent, name, &st)) { close(parent); return wq_selection_changed(errorText); }
         rc = unlinkat(parent, name, 0);
     }
     int err = errno;
@@ -1105,11 +1219,11 @@ static int wq_open_directory(NSString *path)
 BOOL wq_create_file(NSString *path, NSData *data, NSString **errorText)
 {
     if (wq_is_backup_storage_path(path)) {
-        if (errorText) *errorText = @"备份存储不能通过文件浏览器修改。";
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be modified through the file browser.");
         return NO;
     }
     if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path))) {
-        if (errorText) *errorText = @"文件路径无效";
+        if (errorText) *errorText = WQLocalized(@"Invalid file path");
         return NO;
     }
     NSString *parentPath = path.stringByDeletingLastPathComponent;
@@ -1138,11 +1252,11 @@ BOOL wq_create_file(NSString *path, NSData *data, NSString **errorText)
 BOOL wq_create_dir(NSString *path, NSString **errorText)
 {
     if (wq_is_backup_storage_path(path)) {
-        if (errorText) *errorText = @"备份存储不能通过文件浏览器修改。";
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be modified through the file browser.");
         return NO;
     }
     if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path))) {
-        if (errorText) *errorText = @"文件夹路径无效";
+        if (errorText) *errorText = WQLocalized(@"Invalid folder path");
         return NO;
     }
     NSString *parentPath = path.stringByDeletingLastPathComponent;
@@ -1160,14 +1274,386 @@ BOOL wq_create_dir(NSString *path, NSString **errorText)
     return rc == 0;
 }
 
-BOOL wq_delete(NSString *path, NSString **errorText)
+NSDictionary<NSString *, NSNumber *> *wq_identity_for_stat(const struct stat *st)
+{
+    return @{ @"device": @(st->st_dev), @"inode": @(st->st_ino), @"type": @(st->st_mode & S_IFMT) };
+}
+
+NSDictionary<NSString *, NSNumber *> *wq_item_identity(NSString *path)
+{
+    struct stat st;
+    return wq_stat(path, &st) ? wq_identity_for_stat(&st) : nil;
+}
+
+// YES when no identity was given, or st is the object it describes.
+static BOOL wq_identity_matches(NSDictionary<NSString *, NSNumber *> *identity, const struct stat *st)
+{
+    return !identity || [wq_identity_for_stat(st) isEqualToDictionary:identity];
+}
+
+static BOOL wq_selection_changed(NSString **errorText)
+{
+    if (errorText) *errorText = WQLocalized(@"The item was moved, replaced or changed after it was selected. It was left as it is.");
+    return NO;
+}
+
+// The entry `name` in `dir` is still the object st describes (same identity
+// and type). Never follows a link.
+static BOOL wq_entry_is(int dir, const char *name, const struct stat *st)
+{
+    struct stat now;
+    return fstatat(dir, name, &now, AT_SYMLINK_NOFOLLOW) == 0 && WQSameObject(&now, st) &&
+        (now.st_mode & S_IFMT) == (st->st_mode & S_IFMT);
+}
+
+// Backs a regular file up (into `unitStamp`, or a new unit) and removes it.
+static BOOL wq_delete_regular(NSString *path, const struct stat *st, NSString *unitStamp, NSString **errorText)
+{
+    WQMutation mutation;
+    if (!wq_mutation_open(path, wq_version_for_stat(st), &mutation, O_RDONLY, errorText)) return NO;
+    NSString *backup = nil;
+    if (!wq_mutation_backup_into(path, &mutation, unitStamp, &backup, errorText)) { wq_mutation_close(&mutation); return NO; }
+    const char *name = path.lastPathComponent.fileSystemRepresentation;
+    // The name must still be the backed-up file right before it is unlinked.
+    if (!wq_entry_is(mutation.parent, name, &mutation.before)) { wq_mutation_close(&mutation); return wq_selection_changed(errorText); }
+    int rc = unlinkat(mutation.parent, name, 0);
+    int err = errno;
+    wq_mutation_close(&mutation);
+    if (rc != 0 && errorText) *errorText = wq_errno(err);
+    return rc == 0;
+}
+
+// As wq_delete_regular, but relative to a pinned folder descriptor `dir`
+// (a recursive delete): the file is opened through `dir`, the pathname must
+// still lead to `dir` (wq_mutation_current) before and after the backup, and
+// the entry must still be the backed-up file right before it is unlinked.
+static BOOL wq_delete_regular_at(int dir, NSString *path, const struct stat *st, NSString *unitStamp, NSString **errorText)
+{
+    const char *name = path.lastPathComponent.fileSystemRepresentation;
+    WQMutation mutation = { .fd = -1, .parent = fcntl(dir, F_DUPFD_CLOEXEC, 0) };
+    if (mutation.parent < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
+    mutation.fd = WQOpenRegularAt(dir, name, O_RDONLY, 0);
+    if (mutation.fd < 0 && wq_is_denied(errno) && wq_grant(path)) mutation.fd = WQOpenRegularAt(dir, name, O_RDONLY, 0);
+    if (mutation.fd < 0) {
+        int err = errno;
+        wq_mutation_close(&mutation);
+        if (err == EINVAL) return wq_selection_changed(errorText);   // no longer a regular file
+        if (errorText) *errorText = wq_errno(err);
+        return NO;
+    }
+    if (flock(mutation.fd, LOCK_EX | LOCK_NB) != 0) {
+        int err = errno;
+        if (err != ENOTSUP && err != EOPNOTSUPP && err != ENOSYS) {
+            wq_mutation_close(&mutation);
+            if (errorText) *errorText = wq_errno(err);
+            return NO;
+        }
+    }
+    if (fstat(mutation.fd, &mutation.before) != 0 ||
+        ![wq_version_for_stat(&mutation.before) isEqualToDictionary:wq_version_for_stat(st)] ||
+        !wq_mutation_current(path, &mutation, YES, NULL)) {
+        wq_mutation_close(&mutation);
+        return wq_selection_changed(errorText);
+    }
+    NSString *backupError = nil;
+    if (!wq_backup_fd(path, mutation.fd, unitStamp, NULL, &backupError)) {
+        wq_mutation_close(&mutation);
+        if (errorText) *errorText = WQLocalizedFormat(@"Backup of the current file failed, nothing was written: %@", backupError ?: WQLocalized(@"unknown error"));
+        return NO;
+    }
+    WQ_MUTATION_HOOK(@"backedUp", path);
+    if (!wq_mutation_current(path, &mutation, YES, NULL) || !wq_entry_is(dir, name, &mutation.before)) {
+        wq_mutation_close(&mutation);
+        return wq_selection_changed(errorText);
+    }
+    int rc = unlinkat(dir, name, 0);
+    int err = errno;
+    wq_mutation_close(&mutation);
+    if (rc != 0 && errorText) *errorText = wq_errno(err);
+    return rc == 0;
+}
+
+// Container roots and everything above them: deleting one would remove a
+// whole app's (or the system's) data, so folder deletes refuse them.
+BOOL wq_is_protected_folder(NSString *path)
+{
+    NSString *p = WQCanonicalVarPath(path);
+    NSArray<NSString *> *parents = @[
+        @"/private/var/mobile/Containers/Data/Application", @"/private/var/mobile/Containers/Data/PluginKitPlugin",
+        @"/private/var/mobile/Containers/Data/InternalDaemon", @"/private/var/mobile/Containers/Shared/AppGroup",
+        @"/private/var/containers/Data/System", @"/private/var/containers/Shared/SystemGroup",
+        @"/private/var/containers/Bundle/Application",
+    ];
+    for (NSString *parent in parents) {
+        if ([parent hasPrefix:[p stringByAppendingString:@"/"]] || [p isEqualToString:parent]) return YES;   // the parent or above
+        if ([p.stringByDeletingLastPathComponent isEqualToString:parent]) return YES;                       // a container root
+    }
+    // Shallow system paths (/, /private, /private/var, /private/var/mobile…).
+    return p.pathComponents.count <= 5;
+}
+
+// One pinned folder of a recursive delete: its descriptor (opened without
+// following links), its identity, its path, and the children still to remove.
+@interface WQTreeFrame : NSObject {
+@public
+    int fd;
+    struct stat st;
+    NSString *path;
+    NSArray<NSString *> *children;
+    NSUInteger next;
+}
+@end
+@implementation WQTreeFrame
+- (instancetype)init { if ((self = [super init])) fd = -1; return self; }
+- (void)dealloc { if (fd >= 0) close(fd); }
+@end
+
+typedef struct {
+    NSString *stamp;
+    BOOL (^cancelled)(void);
+    void (^progress)(NSUInteger deleted);
+    NSUInteger deleted;
+    NSString *error;
+} WQTreeDelete;
+
+static BOOL wq_tree_fail(WQTreeDelete *ctx, NSString *path, NSString *error)
+{
+    ctx->error = [NSString stringWithFormat:@"%@: %@", path.lastPathComponent, error ?: @"failed"];
+    return NO;
+}
+
+static BOOL wq_tree_changed(WQTreeDelete *ctx, NSString *path)
+{
+    NSString *text = nil;
+    wq_selection_changed(&text);
+    return wq_tree_fail(ctx, path, text);
+}
+
+// The pathname still names the pinned folder (a cheap swap detector; every
+// removal itself stays descriptor-relative).
+static BOOL wq_tree_frame_current(NSString *path, const struct stat *st)
+{
+    struct stat now;
+    return wq_stat(path, &now) && S_ISDIR(now.st_mode) && WQSameObject(&now, st);
+}
+
+// Names in an open folder, read through a fresh descriptor of that folder.
+static NSArray<NSString *> *wq_tree_list(int fd, NSString *path, int *error)
+{
+    int listing = openat(fd, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (listing < 0 && wq_is_denied(errno) && wq_grant(path)) listing = openat(fd, ".", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (listing < 0) { *error = errno; return nil; }
+    DIR *dir = fdopendir(listing);
+    if (!dir) { *error = errno; close(listing); return nil; }
+    NSMutableArray<NSString *> *names = [NSMutableArray new];
+    int err = 0;
+    for (;;) {
+        errno = 0;
+        struct dirent *entry = readdir(dir);
+        if (!entry) { err = errno; break; }
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        NSString *name = [NSFileManager.defaultManager stringWithFileSystemRepresentation:entry->d_name length:strlen(entry->d_name)];
+        if (!name) { err = EILSEQ; break; }
+        [names addObject:name];
+    }
+    closedir(dir);
+    if (err) { *error = err; return nil; }
+    return names;
+}
+
+// Opens the folder `name` in `parent`, checks it is the object st describes,
+// and lists it.
+static WQTreeFrame *wq_tree_open(int parent, NSString *path, const struct stat *st, WQTreeDelete *ctx)
+{
+    const char *name = path.lastPathComponent.fileSystemRepresentation;
+    WQTreeFrame *frame = [WQTreeFrame new];
+    frame->fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (frame->fd < 0 && wq_is_denied(errno) && wq_grant(path))
+        frame->fd = openat(parent, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+    if (frame->fd < 0) {
+        if (errno == ENOTDIR || errno == ELOOP || errno == ENOENT) { wq_tree_changed(ctx, path); return nil; }
+        wq_tree_fail(ctx, path, wq_errno(errno));
+        return nil;
+    }
+    if (fstat(frame->fd, &frame->st) != 0 || !WQSameObject(&frame->st, st) || !S_ISDIR(frame->st.st_mode)) {
+        wq_tree_changed(ctx, path);
+        return nil;
+    }
+    frame->path = path;
+    int err = 0;
+    frame->children = wq_tree_list(frame->fd, path, &err);
+    if (!frame->children) { wq_tree_fail(ctx, path, wq_errno(err)); return nil; }
+    return frame;
+}
+
+// Removes one non-folder entry `name` of the pinned folder `dir` (at dirPath,
+// identity dirSt). Regular files are backed up first; links and special files
+// are removed as they are (never followed).
+static BOOL wq_tree_remove_leaf(int dir, NSString *dirPath, const struct stat *dirSt, NSString *path,
+                                const struct stat *st, WQTreeDelete *ctx)
+{
+    NSString *error = nil;
+    BOOL ok;
+    if (S_ISREG(st->st_mode)) {
+        ok = wq_delete_regular_at(dir, path, st, ctx->stamp, &error);
+    } else {
+        const char *name = path.lastPathComponent.fileSystemRepresentation;
+        WQ_TREE_HOOK(@"deleteTreeUnlink", path);
+        if (!wq_tree_frame_current(dirPath, dirSt) || !wq_entry_is(dir, name, st)) return wq_tree_changed(ctx, path);
+        ok = unlinkat(dir, name, 0) == 0;
+        if (!ok) error = wq_errno(errno);
+    }
+    if (!ok) return wq_tree_fail(ctx, path, error);
+    ctx->deleted++;
+    if (ctx->progress) ctx->progress(ctx->deleted);
+    return YES;
+}
+
+// Iterative, descriptor-relative walk. Every folder is pinned by a descriptor
+// opened without following links; every child is opened or removed relative
+// to it. Before each removal the folder's pathname must still lead to the
+// pinned folder and the entry must still be the object that was examined, so
+// a folder moved or replaced mid-way stops the delete (fail closed) instead
+// of continuing into the replacement.
+static BOOL wq_tree_remove(int parent, NSString *parentPath, const struct stat *parentSt, NSString *path,
+                           const struct stat *rootSt, WQTreeDelete *ctx)
+{
+    if (!S_ISDIR(rootSt->st_mode)) return wq_tree_remove_leaf(parent, parentPath, parentSt, path, rootSt, ctx);
+    WQTreeFrame *root = wq_tree_open(parent, path, rootSt, ctx);
+    if (!root) return NO;
+    NSMutableArray<WQTreeFrame *> *stack = [NSMutableArray arrayWithObject:root];
+    while (stack.count) {
+        if (ctx->cancelled && ctx->cancelled()) { ctx->error = WQLocalized(@"Cancelled"); return NO; }
+        WQTreeFrame *frame = stack.lastObject;
+        if (frame->next < frame->children.count) {
+            NSString *childPath = [frame->path stringByAppendingPathComponent:frame->children[frame->next++]];
+            WQ_TREE_HOOK(@"deleteTreeChild", childPath);
+            if (!wq_tree_frame_current(frame->path, &frame->st)) return wq_tree_changed(ctx, frame->path);
+            struct stat st;
+            if (fstatat(frame->fd, childPath.lastPathComponent.fileSystemRepresentation, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+                if (errno == ENOENT) continue;   // gone meanwhile
+                return wq_tree_fail(ctx, childPath, wq_errno(errno));
+            }
+            if (S_ISDIR(st.st_mode)) {
+                if (stack.count > 128) { ctx->error = WQLocalized(@"Folders are nested too deeply"); return NO; }
+                WQTreeFrame *child = wq_tree_open(frame->fd, childPath, &st, ctx);
+                if (!child) return NO;
+                [stack addObject:child];
+            } else if (!wq_tree_remove_leaf(frame->fd, frame->path, &frame->st, childPath, &st, ctx)) {
+                return NO;
+            }
+            continue;
+        }
+        // Everything inside is gone: remove the folder itself from its parent.
+        [stack removeLastObject];
+        WQTreeFrame *up = stack.lastObject;
+        int dir = up ? up->fd : parent;
+        const char *name = frame->path.lastPathComponent.fileSystemRepresentation;
+        WQ_TREE_HOOK(@"deleteTreeRemoveDir", frame->path);
+        if (!wq_tree_frame_current(up ? up->path : parentPath, up ? &up->st : parentSt) ||
+            !wq_tree_frame_current(frame->path, &frame->st) || !wq_entry_is(dir, name, &frame->st))
+            return wq_tree_changed(ctx, frame->path);
+        if (unlinkat(dir, name, AT_REMOVEDIR) != 0) return wq_tree_fail(ctx, frame->path, wq_errno(errno));
+    }
+    return YES;
+}
+
+BOOL wq_delete_tree_expecting(NSString *path, NSDictionary<NSString *, NSNumber *> *identity, BOOL (^cancelled)(void),
+                              void (^progress)(NSUInteger deleted), NSUInteger *deleted, NSString **backupUnit, NSString **errorText)
+{
+    if (deleted) *deleted = 0;
+    if (backupUnit) *backupUnit = nil;
+    if (wq_is_backup_storage_path(path)) {
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be overwritten or deleted through the file browser.");
+        return NO;
+    }
+    if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path)) || wq_is_protected_folder(path)) {
+        if (errorText) *errorText = WQLocalized(@"This folder can't be deleted: it holds an app's or the system's data.");
+        return NO;
+    }
+    WQTreeDelete ctx = { .stamp = wq_new_backup_stamp(), .cancelled = cancelled, .progress = progress };
+    if (!ctx.stamp) { if (errorText) *errorText = WQLocalized(@"Cannot allocate a backup name."); return NO; }
+    // Pin the parent, then the selected item inside it (no links followed).
+    NSString *parentPath = path.stringByDeletingLastPathComponent;
+    int parent = wq_open_directory_flags(parentPath, O_SEARCH);
+    if (parent < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
+    const char *name = path.lastPathComponent.fileSystemRepresentation;
+    struct stat parentSt, st;
+    BOOL ok;
+    if (fstat(parent, &parentSt) != 0) {
+        ok = wq_tree_fail(&ctx, parentPath, wq_errno(errno));
+    } else if (fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW) != 0 &&
+               !(wq_is_denied(errno) && wq_grant(parentPath) && fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW) == 0)) {
+        // Already gone: nothing to delete, unless a specific item was expected.
+        int err = errno;
+        ok = err == ENOENT && !identity;
+        if (!ok) {
+            if (err == ENOENT) wq_tree_changed(&ctx, path);
+            else wq_tree_fail(&ctx, path, wq_errno(err));
+        }
+    } else if (!wq_identity_matches(identity, &st)) {
+        ok = wq_tree_changed(&ctx, path);
+    } else {
+        ok = wq_tree_remove(parent, parentPath, &parentSt, path, &st, &ctx);
+    }
+    close(parent);
+    if (deleted) *deleted = ctx.deleted;
+    NSString *unit = [wq_backup_root() stringByAppendingPathComponent:ctx.stamp];
+    struct stat ust;
+    if (backupUnit) *backupUnit = lstat(unit.fileSystemRepresentation, &ust) == 0 ? unit : nil;
+    wq_log(@"delete folder: %@ -> %@, %lu items removed (unit %@)", path, ok ? @"OK" : ctx.error,
+           (unsigned long)ctx.deleted, ctx.stamp);
+    if (!ok && errorText) *errorText = ctx.error;
+    return ok;
+}
+
+BOOL wq_delete_tree(NSString *path, BOOL (^cancelled)(void), void (^progress)(NSUInteger deleted),
+                    NSUInteger *deleted, NSString **backupUnit, NSString **errorText)
+{
+    return wq_delete_tree_expecting(path, nil, cancelled, progress, deleted, backupUnit, errorText);
+}
+
+WQTreeCount wq_tree_count(NSString *path, NSUInteger limit)
+{
+    WQTreeCount count = { 0, 0, 0, WQTreeCountExact };
+    struct stat st;
+    if (!wq_stat(path, &st)) {
+        if (errno != ENOENT) count.state = WQTreeCountUnreadable;
+        return count;
+    }
+    if (!S_ISDIR(st.st_mode)) {
+        if (S_ISREG(st.st_mode)) { count.regular = 1; count.bytes = (unsigned long long)st.st_size; }
+        else count.other = 1;
+        return count;
+    }
+    NSMutableArray<NSString *> *pending = [NSMutableArray arrayWithObject:path];
+    while (pending.count) {
+        if (count.regular + count.other >= limit) { count.state = WQTreeCountLimited; break; }
+        NSString *dir = pending.lastObject;
+        [pending removeLastObject];
+        NSArray<NSString *> *children = wq_list(dir, NULL);
+        if (!children) { count.state = WQTreeCountUnreadable; continue; }
+        for (NSString *child in children) {
+            NSString *p = [dir stringByAppendingPathComponent:child];
+            if (!wq_stat(p, &st)) { if (errno != ENOENT) count.state = WQTreeCountUnreadable; continue; }
+            if (S_ISDIR(st.st_mode)) [pending addObject:p];
+            else if (S_ISREG(st.st_mode)) { count.regular++; count.bytes += (unsigned long long)st.st_size; }
+            else count.other++;
+        }
+    }
+    // An unreadable part outranks the limit: the totals are not even a lower
+    // bound for what the delete will meet there.
+    return count;
+}
+
+BOOL wq_delete_expecting(NSString *path, NSDictionary<NSString *, NSNumber *> *identity, NSString **errorText)
 {
     if (wq_is_backup_storage_path(path)) {
-        if (errorText) *errorText = @"备份存储不能通过文件浏览器覆盖或删除。";
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be overwritten or deleted through the file browser.");
         return NO;
     }
     if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path))) {
-        if (errorText) *errorText = @"文件路径无效";
+        if (errorText) *errorText = WQLocalized(@"Invalid file path");
         return NO;
     }
     NSString *parentPath = path.stringByDeletingLastPathComponent;
@@ -1178,58 +1664,163 @@ BOOL wq_delete(NSString *path, NSString **errorText)
     if (fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW) != 0 &&
         !(wq_is_denied(errno) && wq_grant(parentPath) &&
           fstatat(parent, name, &st, AT_SYMLINK_NOFOLLOW) == 0)) {
-        if (errorText) *errorText = errno == ENOENT ? @"未找到" : wq_errno(errno);
+        if (errorText) *errorText = errno == ENOENT ? WQLocalized(@"Not found") : wq_errno(errno);
         close(parent);
         return NO;
     }
+    if (!wq_identity_matches(identity, &st)) {
+        close(parent);
+        wq_log(@"delete: %@ -> changed since it was selected", path);
+        return wq_selection_changed(errorText);
+    }
     if (S_ISREG(st.st_mode)) {
         close(parent);
-        WQMutation mutation;
-        if (!wq_mutation_open(path, wq_version_for_stat(&st), &mutation, O_RDONLY, errorText)) return NO;
-        NSString *backup = nil;
-        if (!wq_mutation_backup(path, &mutation, &backup, errorText)) { wq_mutation_close(&mutation); return NO; }
-        int rc = unlinkat(mutation.parent, name, 0);
-        int err = errno;
-        wq_mutation_close(&mutation);
-        if (rc != 0 && errorText) *errorText = wq_errno(err);
-        wq_log(@"delete: %@ -> %@", path, rc == 0 ? @"OK" : wq_errno(err));
-        return rc == 0;
+        BOOL ok = wq_delete_regular(path, &st, nil, errorText);
+        wq_log(@"delete: %@ -> %@", path, ok ? @"OK" : (errorText && *errorText ? *errorText : @"failed"));
+        return ok;
     }
     int flags = S_ISDIR(st.st_mode) ? AT_REMOVEDIR : 0;
-    int rc = unlinkat(parent, name, flags);
-    if (rc != 0 && wq_is_denied(errno) && wq_grant(parentPath))
+    WQ_TREE_HOOK(@"deleteReady", path);
+    // Links and special files have no backup: the name must still be the
+    // examined object right before it is removed.
+    int rc = -1;
+    if (wq_entry_is(parent, name, &st)) {
         rc = unlinkat(parent, name, flags);
+        if (rc != 0 && wq_is_denied(errno) && wq_grant(parentPath) && wq_entry_is(parent, name, &st))
+            rc = unlinkat(parent, name, flags);
+    } else {
+        close(parent);
+        wq_log(@"delete: %@ -> changed before removal", path);
+        return wq_selection_changed(errorText);
+    }
     int err = errno;
     close(parent);
     wq_log(@"delete: %@ -> %@", path, rc == 0 ? @"OK" : wq_errno(err));
-    if (rc != 0 && errorText) *errorText = err == ENOTEMPTY ? @"只能删除空文件夹" : wq_errno(err);
+    if (rc != 0 && errorText) *errorText = err == ENOTEMPTY ? WQLocalized(@"Only empty folders can be deleted") : wq_errno(err);
     return rc == 0;
 }
 
-BOOL wq_rename(NSString *path, NSString *newName, NSString **errorText)
+BOOL wq_delete(NSString *path, NSString **errorText)
+{
+    return wq_delete_expecting(path, nil, errorText);
+}
+
+// Source-identity guard for rename and move: `name` in `from` must be the
+// selected object before the no-replace rename, and the renamed entry must
+// be that same object afterwards. A replacement that slipped in between is
+// put back (no-replace) and the operation fails.
+static BOOL wq_rename_checked(int from, const char *name, int to, const char *newName, NSString *sourcePath,
+                              NSArray<NSString *> *grants, NSDictionary<NSString *, NSNumber *> *identity,
+                              NSString *hookStage, NSString *hookPath, BOOL *changed)
+{
+    *changed = NO;
+    (void)hookStage; (void)hookPath;   // test hooks only
+    struct stat before, after;
+    if (fstatat(from, name, &before, AT_SYMLINK_NOFOLLOW) != 0) {
+        if (!wq_is_denied(errno)) return NO;
+        for (NSString *grant in grants) wq_grant(grant);
+        if (fstatat(from, name, &before, AT_SYMLINK_NOFOLLOW) != 0) return NO;
+    }
+    if (!wq_identity_matches(identity, &before)) { *changed = YES; return NO; }
+    WQ_TREE_HOOK(hookStage, hookPath);
+    // RENAME_EXCL: never replaces an item that is already there.
+    int rc = renameatx_np(from, name, to, newName, RENAME_EXCL);
+    if (rc != 0 && wq_is_denied(errno)) {
+        for (NSString *grant in grants) wq_grant(grant);
+        rc = renameatx_np(from, name, to, newName, RENAME_EXCL);
+    }
+    if (rc != 0) return NO;
+    if (fstatat(to, newName, &after, AT_SYMLINK_NOFOLLOW) == 0 && WQSameObject(&after, &before) &&
+        (after.st_mode & S_IFMT) == (before.st_mode & S_IFMT)) return YES;
+    *changed = YES;
+    int back = renameatx_np(to, newName, from, name, RENAME_EXCL);
+    wq_log(@"rename/move: %@ was replaced during the operation; %@", sourcePath,
+           back == 0 ? @"put back" : [@"could not put it back: " stringByAppendingString:wq_errno(errno)]);
+    errno = EAGAIN;
+    return NO;
+}
+
+BOOL wq_rename_expecting(NSString *path, NSString *newName, NSDictionary<NSString *, NSNumber *> *identity, NSString **errorText)
 {
     if (!WQAbsolutePathGrammar(WQCanonicalVarPath(path)) || newName.length == 0 || [newName containsString:@"/"] ||
         [newName isEqualToString:@"."] || [newName isEqualToString:@".."] || [newName rangeOfString:@"\0"].location != NSNotFound) {
-        if (errorText) *errorText = @"名称无效";
+        if (errorText) *errorText = WQLocalized(@"Invalid name");
         return NO;
     }
     if (wq_is_backup_storage_path(path) ||
         wq_is_backup_storage_path([path.stringByDeletingLastPathComponent stringByAppendingPathComponent:newName])) {
-        if (errorText) *errorText = @"备份存储不能通过文件浏览器重命名。";
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be renamed through the file browser.");
         return NO;
     }
     NSString *parentPath = path.stringByDeletingLastPathComponent;
     int parent = wq_open_directory_flags(parentPath, O_SEARCH);
     if (parent < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
-    WQ_TREE_HOOK(@"renameReady", [parentPath stringByAppendingPathComponent:newName]);
-    int rc = renameatx_np(parent, path.lastPathComponent.fileSystemRepresentation, parent, newName.fileSystemRepresentation, RENAME_EXCL);
-    if (rc != 0 && wq_is_denied(errno) && wq_grant(parentPath))
-        rc = renameatx_np(parent, path.lastPathComponent.fileSystemRepresentation, parent, newName.fileSystemRepresentation, RENAME_EXCL);
+    BOOL changed = NO;
+    BOOL ok = wq_rename_checked(parent, path.lastPathComponent.fileSystemRepresentation, parent, newName.fileSystemRepresentation,
+                                path, @[parentPath], identity, @"renameReady", [parentPath stringByAppendingPathComponent:newName], &changed);
     int err = errno;
     close(parent);
-    wq_log(@"rename: %@ -> %@: %@", path, newName, rc == 0 ? @"OK" : wq_errno(err));
-    if (rc != 0 && errorText) *errorText = err == EEXIST ? @"已存在同名项目" : wq_errno(err);
-    return rc == 0;
+    wq_log(@"rename: %@ -> %@: %@", path, newName, ok ? @"OK" : changed ? @"changed since it was selected" : wq_errno(err));
+    if (!ok && changed) return wq_selection_changed(errorText);
+    if (!ok && errorText) *errorText = err == EEXIST ? WQLocalized(@"An item with that name already exists") : wq_errno(err);
+    return ok;
+}
+
+BOOL wq_rename(NSString *path, NSString *newName, NSString **errorText)
+{
+    return wq_rename_expecting(path, newName, nil, errorText);
+}
+
+BOOL wq_move_expecting(NSString *path, NSString *destDir, NSDictionary<NSString *, NSNumber *> *identity, NSString **errorText)
+{
+    NSString *source = WQCanonicalVarPath(path), *target = WQCanonicalVarPath(destDir);
+    NSString *name = source.lastPathComponent;
+    if (!WQAbsolutePathGrammar(source) || !WQAbsolutePathGrammar(target) || !name.length) {
+        if (errorText) *errorText = WQLocalized(@"Invalid path");
+        return NO;
+    }
+    NSString *sourceParent = source.stringByDeletingLastPathComponent;
+    if ([sourceParent isEqualToString:target]) {
+        if (errorText) *errorText = WQLocalized(@"It is already in this folder");
+        return NO;
+    }
+    if ([target isEqualToString:source] || [target hasPrefix:[source stringByAppendingString:@"/"]]) {
+        if (errorText) *errorText = WQLocalized(@"A folder can't be moved into itself");
+        return NO;
+    }
+    if (wq_is_backup_storage_path(source) || wq_is_backup_storage_path([target stringByAppendingPathComponent:name])) {
+        if (errorText) *errorText = WQLocalized(@"Backup storage cannot be changed through the file browser.");
+        return NO;
+    }
+    int from = wq_open_directory_flags(sourceParent, O_SEARCH);
+    if (from < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
+    int to = wq_open_directory_flags(target, O_SEARCH);
+    if (to < 0) { if (errorText) *errorText = wq_errno(errno); close(from); return NO; }
+    const char *n = name.fileSystemRepresentation;
+    BOOL changed = NO;
+    BOOL ok = wq_rename_checked(from, n, to, n, source, @[sourceParent, target, source], identity, @"moveReady", source, &changed);
+    int err = errno;
+    if (ok) { fsync(to); fsync(from); }
+    close(from);
+    close(to);
+    wq_log(@"move: %@ -> %@: %@", path, destDir, ok ? @"OK" : changed ? @"changed since it was selected" : wq_errno(err));
+    if (!ok && changed) return wq_selection_changed(errorText);
+    if (!ok && errorText) {
+        *errorText = err == EEXIST ? WQLocalizedFormat(@"An item named \"%@\" is already there", name)
+                   : err == EXDEV ? WQLocalized(@"Items can't be moved to another volume")
+                   : wq_errno(err);
+    }
+    return ok;
+}
+
+BOOL wq_move(NSString *path, NSString *destDir, NSString **errorText)
+{
+    return wq_move_expecting(path, destDir, nil, errorText);
+}
+
+int wq_open_for_reading(NSString *path)
+{
+    return wq_open(path, O_RDONLY, 0);
 }
 
 // fsgetpath: resolve a filesystem object id to a path. Not in the public SDK.
@@ -1292,7 +1883,8 @@ typedef void (^WQScanProgress)(int64_t done, int64_t total, const NSUInteger *co
 static NSArray<NSMutableDictionary<NSString *, NSNumber *> *> *wq_scan_children(fsid_t fsid, int64_t firstId, int64_t lastId,
                                                                                NSArray<NSString *> *bases,
                                                                                WQScanCancellation *cancellation,
-                                                                               qos_class_t qos, WQScanProgress progress)
+                                                                               qos_class_t qos, BOOL allCores,
+                                                                               WQScanProgress progress)
 {
     NSUInteger baseCount = MIN(bases.count, (NSUInteger)8);
     // Heap tables: blocks can't capture C arrays.
@@ -1313,7 +1905,10 @@ static NSArray<NSMutableDictionary<NSString *, NSNumber *> *> *wq_scan_children(
     int64_t chunks = (total + chunk - 1) / chunk;
     __block int64_t nextChunk = 0, done = 0;
     NSUInteger cores = NSProcessInfo.processInfo.activeProcessorCount;
-    size_t workers = (size_t)MAX((NSUInteger)1, MIN((NSUInteger)4, cores / 2));
+    // A full scan the user agreed to wait for uses all but two cores; the
+    // short incremental scans stay at half the cores.
+    size_t workers = allCores ? (size_t)MAX((NSUInteger)2, MIN((NSUInteger)8, cores > 2 ? cores - 2 : 1))
+                              : (size_t)MAX((NSUInteger)1, MIN((NSUInteger)4, cores / 2));
     dispatch_apply(workers, dispatch_get_global_queue(qos, 0), ^(size_t __unused w) {
         fsid_t id = fsid;
         char buf[1200];
@@ -1472,11 +2067,15 @@ static void wq_shared_scan_setup(void)
 }
 
 static void wq_scan_slots_clear(void);
+static void wq_label_caches_invalidate(void);
 
 void wq_enumerate_invalidate(void)
 {
     wq_shared_scan_setup();
     @synchronized (gSharedScanGuard) { wq_scan_slots_clear(); }
+    wq_label_caches_invalidate();
+    // A refresh also retries the background LaunchServices database search.
+    [NSUserDefaults.standardUserDefaults removeObjectForKey:@"WQLaunchServicesDiscoveryMissedAt"];
 }
 
 BOOL wq_scan_cache_clear(void)
@@ -1513,7 +2112,44 @@ static NSString *wq_sample_area(NSString *path)
 
 // LaunchServices API: each app's and plug-in's data container, where the
 // system lets this app ask (it refuses on iOS 27).
+// Path -> bundle id caches (this API's and the container manager's) are tied
+// to the folder object they were made for: each entry keeps the (device,
+// inode) seen when it was recorded, or on its first use when the folder
+// couldn't be checked then, and a folder with another identity doesn't get
+// the cached id. An explicit refresh drops both caches.
 static NSDictionary<NSString *, NSString *> *gLSAPILabels;
+static NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *gLSAPIIdentities;
+static _Atomic NSUInteger gWQLabelGeneration;
+
+typedef NS_ENUM(int, WQLabelIdentity) { WQLabelIdentityUnknown, WQLabelIdentityKnown, WQLabelIdentityGone };
+
+static WQLabelIdentity wq_label_identity(NSString *path, NSArray<NSNumber *> **identity)
+{
+    *identity = nil;
+    struct stat st;
+    if (lstat(path.fileSystemRepresentation, &st) != 0) return errno == ENOENT ? WQLabelIdentityGone : WQLabelIdentityUnknown;
+    if (!S_ISDIR(st.st_mode)) return WQLabelIdentityGone;
+    *identity = @[@((uint64_t)st.st_dev), @((uint64_t)st.st_ino)];
+    return WQLabelIdentityKnown;
+}
+
+// Whether a cached id for key may be used for the folder as it is now.
+// Caller holds the lock of identities.
+static BOOL wq_label_identity_matches(NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *identities, NSString *key,
+                                      WQLabelIdentity state, NSArray<NSNumber *> *current)
+{
+    if (state == WQLabelIdentityGone) return NO;
+    if (state == WQLabelIdentityUnknown) return YES;   // can't be checked: as before
+    NSArray *recorded = identities[key];
+    if (!recorded) { identities[key] = current; return YES; }
+    return [recorded isEqualToArray:current];
+}
+
+static void wq_label_caches_invalidate(void)
+{
+    @synchronized (NSNull.null) { gLSAPILabels = nil; gLSAPIIdentities = nil; }
+    atomic_fetch_add(&gWQLabelGeneration, 1);
+}
 
 static NSDictionary<NSString *, NSArray<NSString *> *> *wq_lsapi_list_containers(NSArray<NSString *> *roots, NSString **summary)
 {
@@ -1556,7 +2192,12 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *wq_lsapi_list_containers
     *summary = [NSString stringWithFormat:@"LaunchServices API: %lu apps and %lu plug-ins, %lu data containers (%lu apps, %lu extensions)",
                 (unsigned long)proxies, (unsigned long)plugins, (unsigned long)labels.count,
                 (unsigned long)[result[roots[0]] count], (unsigned long)[result[roots[1]] count]];
-    @synchronized (NSNull.null) { gLSAPILabels = [labels copy]; }
+    NSMutableDictionary *identities = [NSMutableDictionary new];
+    for (NSString *path in labels) {
+        NSArray<NSNumber *> *identity = nil;
+        if (wq_label_identity(path, &identity) == WQLabelIdentityKnown) identities[path] = identity;
+    }
+    @synchronized (NSNull.null) { gLSAPILabels = [labels copy]; gLSAPIIdentities = identities; }
     return result;
 }
 
@@ -1613,7 +2254,7 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *wq_mcm_list_containers(N
 
 // Samples ids across the volume. On some releases fsgetpath resolves only the
 // caller's own files; then a full scan takes minutes and finds nothing.
-static BOOL wq_fsgetpath_sees_others(fsid_t fsid, int64_t maxInode)
+static BOOL wq_fsgetpath_sees_others(fsid_t fsid, int64_t maxInode, double *idsPerSecond)
 {
     NSMutableArray<NSString *> *own = [NSMutableArray arrayWithObject:wq_norm(NSHomeDirectory())];
     NSString *bundle = wq_norm(NSBundle.mainBundle.bundlePath.stringByDeletingLastPathComponent);
@@ -1652,7 +2293,106 @@ static BOOL wq_fsgetpath_sees_others(fsid_t fsid, int64_t maxInode)
             [parts addObject:[NSString stringWithFormat:@"%@ x%lu", area, (unsigned long)[areas countForObject:area]]];
         wq_log(@"scan: resolvable areas: %@", [parts componentsJoinedByString:@", "]);
     }
+    double elapsed = CFAbsoluteTimeGetCurrent() - started;
+    if (idsPerSecond) *idsPerSecond = elapsed > 0 ? sampled / elapsed : 0;
     return foreign > 0;
+}
+
+// Full scans (every file id) take minutes on a well-used device. The UI
+// confirms them first and shows their progress; without a UI hook (or when
+// the app isn't in front) they don't start.
+static BOOL (*gFullScanConfirm)(NSString *what, int64_t ids, double seconds);
+static void (*gFullScanProgress)(int64_t done, int64_t total, BOOL finished);
+static WQScanCancellation *gFullScanStop;
+static _Atomic BOOL gFullScanDeclined;
+
+void wq_set_full_scan_ui(BOOL (*confirm)(NSString *what, int64_t ids, double seconds),
+                         void (*progress)(int64_t done, int64_t total, BOOL finished))
+{
+    gFullScanConfirm = confirm;
+    gFullScanProgress = progress;
+}
+
+void wq_full_scan_stop(void)
+{
+    @synchronized (NSNull.null) { [gFullScanStop cancel]; }
+}
+
+BOOL wq_full_scan_was_declined(void)
+{
+    return atomic_load(&gFullScanDeclined);
+}
+
+// Full scans run one at a time (the App Data and Internal Daemons slots can
+// both need one): the stop token, the progress window, its completion and the
+// background task belong to a single scan. A second full scan waits here until
+// the first has ended, and only then asks.
+static dispatch_semaphore_t wq_full_scan_gate(void)
+{
+    static dispatch_semaphore_t gate;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ gate = dispatch_semaphore_create(1); });
+    return gate;
+}
+
+// NO when the caller was cancelled while waiting.
+static BOOL wq_full_scan_acquire(NSString *what, WQScanCancellation *caller)
+{
+    dispatch_semaphore_t gate = wq_full_scan_gate();
+    if (dispatch_semaphore_wait(gate, DISPATCH_TIME_NOW) == 0) return YES;
+    wq_log(@"scan: full scan of %@ waits for the running one", what);
+    while (dispatch_semaphore_wait(gate, dispatch_time(DISPATCH_TIME_NOW, 200 * NSEC_PER_MSEC)) != 0) {
+        if (caller.isCancelled) return NO;
+    }
+    return YES;
+}
+
+static void wq_full_scan_release(void)
+{
+    dispatch_semaphore_signal(wq_full_scan_gate());
+}
+
+// Asks before a full scan. Returns the scan's stop token, or nil when the user
+// (or the missing UI) declined. A non-nil token holds the full-scan gate until
+// wq_full_scan_end.
+static WQScanCancellation *wq_full_scan_begin(NSString *what, int64_t ids, double seconds, WQScanCancellation *caller)
+{
+    // Without an App Group no container can be opened or named, so a long
+    // scan would only produce a list of unusable folders.
+    if (!wq_app_group()) {
+        atomic_store(&gFullScanDeclined, YES);
+        wq_log(@"scan: no App Group; full scan of %@ skipped", what);
+        return nil;
+    }
+    if (!wq_full_scan_acquire(what, caller)) return nil;
+    if (!gFullScanConfirm || !gFullScanConfirm(what, ids, seconds)) {
+        atomic_store(&gFullScanDeclined, YES);
+        wq_log(@"scan: full scan of %@ not started (%lld ids, about %.0f s)", what, (long long)ids, seconds);
+        wq_full_scan_release();
+        return nil;
+    }
+    atomic_store(&gFullScanDeclined, NO);
+    WQScanCancellation *stop = [WQScanCancellation new];
+    @synchronized (NSNull.null) { gFullScanStop = stop; }
+    return stop;
+}
+
+static void wq_full_scan_end(WQScanCancellation *stop)
+{
+    @synchronized (NSNull.null) { if (gFullScanStop == stop) gFullScanStop = nil; }
+    // The window's completion is queued before the next scan can ask.
+    if (gFullScanProgress) gFullScanProgress(0, 0, YES);
+    if (stop.isCancelled) wq_log(@"scan: full scan stopped");
+    wq_full_scan_release();
+}
+
+// Rough duration of a full scan from a single-thread sample rate.
+static double wq_full_scan_estimate(int64_t ids, double sampleRate)
+{
+    NSUInteger cores = NSProcessInfo.processInfo.activeProcessorCount;
+    double workers = MAX(2.0, MIN(8.0, cores > 2 ? (double)cores - 2 : 1.0));
+    double rate = (sampleRate > 0 ? sampleRate : 15000.0) * workers * 0.8;
+    return ids / rate;
 }
 
 static NSArray<NSString *> *(*gContainerListProvider)(NSString *storeHint);
@@ -1672,8 +2412,11 @@ static BOOL wq_is_ls_store_name(const char *path)
 
 // The LaunchServices database is rewritten on every app install or update, so
 // its id is among the newest: scan down from the top and stop at the first.
+static const CFTimeInterval kWQStoreSearchLimit = 20;
+
 static NSString *wq_scan_for_ls_store(fsid_t fsid, int64_t maxInode, qos_class_t qos, WQScanProgress progress)
 {
+    CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
     const int64_t chunk = 32768;
     int64_t chunks = (maxInode + chunk - 1) / chunk;
     __block int64_t nextChunk = 0, done = 0;
@@ -1692,6 +2435,9 @@ static NSString *wq_scan_for_ls_store(fsid_t fsid, int64_t maxInode, qos_class_t
             int64_t c = nextChunk++;
             [lock unlock];
             if (c >= chunks) return;
+            // Normally found among the newest ids within seconds; past the
+            // limit the full scan is the better way (and asks first).
+            if (CFAbsoluteTimeGetCurrent() - started > kWQStoreSearchLimit) { [stop cancel]; return; }
             int64_t last = maxInode - c * chunk, first = MAX((int64_t)1, last - chunk + 1);
             for (int64_t ino = last; ino >= first; ino--) {
                 if ((ino & 127) == 0 && stop.isCancelled) return;
@@ -1712,7 +2458,54 @@ static NSString *wq_scan_for_ls_store(fsid_t fsid, int64_t maxInode, qos_class_t
     return found;
 }
 
-// iOS 26: the App Data and Extensions lists from the LaunchServices database.
+// When the container manager lists the containers, the database search in
+// wq_containers_from_ls_store doesn't run, yet the name loader only reads a
+// remembered database: look for it in the background (the same bounded id
+// search), so app names and labels don't stay missing after a cold start.
+// One search at a time; after a miss, again only after a day or a refresh.
+static NSString *const kWQStoreDiscoveryMissKey = @"WQLaunchServicesDiscoveryMissedAt";
+static _Atomic BOOL gStoreDiscoveryRunning;
+
+static void wq_discover_ls_store_in_background(fsid_t fsid)
+{
+    if (!gContainerListProvider) return;
+    NSDate *missed = [NSUserDefaults.standardUserDefaults objectForKey:kWQStoreDiscoveryMissKey];
+    if ([missed isKindOfClass:NSDate.class] && fabs(missed.timeIntervalSinceNow) < 24 * 60 * 60) return;
+    if (atomic_exchange(&gStoreDiscoveryRunning, YES)) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @try {
+            if (gContainerListProvider(nil).count >= 2) return;   // remembered and readable
+            int64_t probeInode = 0;
+            int64_t maxInode = wq_volume_max_inode(fsid, &probeInode);
+            NSString *store = maxInode > 0 ? wq_scan_for_ls_store(fsid, maxInode, QOS_CLASS_UTILITY, nil) : nil;
+            NSUInteger listed = store ? gContainerListProvider(store).count : 0;
+            if (listed < 2) {
+                [NSUserDefaults.standardUserDefaults setObject:NSDate.date forKey:kWQStoreDiscoveryMissKey];
+                wq_log(@"scan: LaunchServices database for app names %@", store ? @"found but not usable" : @"not found by id");
+            } else {
+                wq_log(@"scan: LaunchServices database for app names found by id (%lu containers)", (unsigned long)listed);
+            }
+        } @finally {
+            atomic_store(&gStoreDiscoveryRunning, NO);
+        }
+    });
+}
+
+// The LaunchServices database keeps containers of earlier installs that no
+// longer exist. Drop those (lstat says ENOENT even without access); keep
+// anything that exists or can't be checked.
+static NSArray<NSString *> *wq_existing_containers(NSArray<NSString *> *paths, NSUInteger *dropped)
+{
+    NSMutableArray *kept = [NSMutableArray arrayWithCapacity:paths.count];
+    struct stat st;
+    for (NSString *path in paths) {
+        if (lstat(path.fileSystemRepresentation, &st) != 0 && errno == ENOENT) { (*dropped)++; continue; }
+        [kept addObject:path];
+    }
+    return kept;
+}
+
+// The App Data and Extensions lists from the LaunchServices database.
 static NSDictionary<NSString *, NSArray<NSString *> *> *wq_containers_from_ls_store(NSArray<NSString *> *roots, fsid_t fsid,
                                                                                    qos_class_t qos, WQScanProgress progress)
 {
@@ -1732,13 +2525,18 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *wq_containers_from_ls_st
         paths = gContainerListProvider(store);
         how = [NSString stringWithFormat:@"found by id in %.1f s", CFAbsoluteTimeGetCurrent() - started];
         if (paths.count < 2) {
-            wq_log(@"scan: the LaunchServices database at %@ lists no containers", store);
+            wq_log(@"scan: the LaunchServices database at %@ couldn't be read or lists no containers", store);
             return nil;
         }
     }
+    NSUInteger stale = 0;
+    NSMutableArray *normalized = [NSMutableArray arrayWithCapacity:paths.count];
+    for (NSString *path in paths) [normalized addObject:wq_norm(path)];
+    paths = wq_existing_containers(normalized, &stale);
+    if (stale) wq_log(@"scan: %lu containers in the LaunchServices database no longer exist (earlier installs); skipped", (unsigned long)stale);
     NSMutableDictionary<NSString *, NSMutableArray *> *byRoot = [NSMutableDictionary new];
     for (NSString *root in roots) byRoot[root] = [NSMutableArray new];
-    for (NSString *path in paths) [byRoot[wq_norm(path).stringByDeletingLastPathComponent] addObject:wq_norm(path)];
+    for (NSString *path in paths) [byRoot[path.stringByDeletingLastPathComponent] addObject:path];
     if ([byRoot[roots[0]] count] < 2) return nil;
     NSMutableDictionary *result = [NSMutableDictionary new];
     for (NSString *root in roots) result[root] = [byRoot[root] sortedArrayUsingSelector:@selector(compare:)];
@@ -1753,6 +2551,7 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *wq_containers_from_ls_st
 static NSDictionary<NSString *, NSArray<NSString *> *> *wq_run_shared_scan(fsid_t fsid, qos_class_t qos, BOOL inodeOnly)
 {
     NSArray<NSString *> *roots = wq_shared_scan_roots();
+    atomic_store(&gFullScanDeclined, NO);
     if (inodeOnly) goto inodeScan;
     {
     NSString *mcmSummary = nil;
@@ -1760,7 +2559,10 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *wq_run_shared_scan(fsid_
     wq_log(@"scan: %@", mcmSummary);
     // Other apps' containers listed: no scan needed. A list with only this
     // app's own container is not enough.
-    if ([listed[roots[0]] count] > 1) return listed;
+    if ([listed[roots[0]] count] > 1) {
+        wq_discover_ls_store_in_background(fsid);
+        return listed;
+    }
     NSString *lsSummary = nil;
     NSDictionary<NSString *, NSArray<NSString *> *> *lsListed = wq_lsapi_list_containers(roots, &lsSummary);
     wq_log(@"scan: %@", lsSummary);
@@ -1771,9 +2573,9 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *wq_run_shared_scan(fsid_
         if (![merged[roots[2]] count]) merged[roots[2]] = @[];
         return merged;
     }
-    if (!wq_system_areas_reachable()) {
-        // A full scan of a well-used iOS 26 device is 100+ million ids
-        // (about 40 minutes); the database lists the same containers.
+    {
+        // A full scan is tens of millions of ids (minutes, up to most of an
+        // hour); the database lists the same app and extension containers.
         WQScanProgress report = ^(int64_t done, int64_t total, const NSUInteger *__unused counts) {
             void (^progress)(int64_t, int64_t, NSUInteger) = nil;
             @synchronized (gSharedScanGuard) { progress = gScanProgress; }
@@ -1808,9 +2610,27 @@ inodeScan:;
         firstId = [cache[@"probe"] longLongValue] + 1;
         fullAt = [cache[@"fullAt"] doubleValue];
     }
-    if (!cache && !wq_fsgetpath_sees_others(fsid, maxInode)) {
+    double sampleRate = 0;
+    // A remembered scan whose app containers all vanished (for example after
+    // an iOS update that stopped fsgetpath resolving other apps' ids) must
+    // not quietly become an empty list: check again whether scanning works.
+    if (cache && ![known[0] count]) {
+        wq_log(@"scan: none of the remembered app containers resolve anymore (%lu dropped); checking whether ids still resolve", (unsigned long)dropped);
+        if (!wq_fsgetpath_sees_others(fsid, maxInode, &sampleRate)) {
+            wq_log(@"scan: on this iOS version fsgetpath only resolves WQ Files' own files, so containers can't be found by scanning");
+            return nil;
+        }
+    }
+    if (!cache && !wq_fsgetpath_sees_others(fsid, maxInode, &sampleRate)) {
         wq_log(@"scan: on this iOS version fsgetpath only resolves WQ Files' own files, so containers can't be found by scanning");
         return nil;
+    }
+    WQScanCancellation *stop = nil;
+    if (!cache) {
+        stop = wq_full_scan_begin(inodeOnly ? WQLocalized(@"Internal Daemons") : WQLocalized(@"the app folders"), maxInode,
+                                  wq_full_scan_estimate(maxInode, sampleRate), nil);
+        if (!stop) return nil;
+        qos = QOS_CLASS_USER_INITIATED;
     }
     CFAbsoluteTime started = CFAbsoluteTimeGetCurrent();
     WQScanProgress report = ^(int64_t done, int64_t total, const NSUInteger *counts) {
@@ -1818,8 +2638,10 @@ inodeScan:;
         NSUInteger index = 0;
         @synchronized (gSharedScanGuard) { progress = gScanProgress; index = gScanProgressIndex; }
         if (progress) progress(done, total, (index < roots.count ? known[index].count : 0) + (index < 8 ? counts[index] : 0));
+        if (stop && gFullScanProgress) gFullScanProgress(done, total, NO);
     };
-    NSArray *lists = wq_scan_children(fsid, firstId, maxInode, roots, nil, qos, report);
+    NSArray *lists = wq_scan_children(fsid, firstId, maxInode, roots, stop, qos, stop != nil, report);
+    if (stop) wq_full_scan_end(stop);
     if (!lists) return nil;
     NSMutableDictionary *saved = [NSMutableDictionary new];
     NSMutableDictionary *scan = [NSMutableDictionary new];
@@ -1844,11 +2666,17 @@ inodeScan:;
 // One scan per slot runs at a time. On iOS 26 the Internal Daemons id scan
 // (most of an hour the first time) has its own slot, so the lists that come
 // from the LaunchServices database never wait for it.
+// generation: bumped by wq_enumerate_invalidate. A worker publishes into the
+// slot only when the generation it started with is still current; callers
+// after an invalidation start a new worker, which first waits for the
+// detached one (previous) so the two never scan at the same time.
 @interface WQScanSlot : NSObject
 @property (nonatomic, copy) NSDictionary<NSString *, NSArray<NSString *> *> *scan;
 @property (nonatomic) NSTimeInterval at;
 @property (nonatomic, strong) dispatch_group_t group;
 @property (nonatomic, strong) NSMutableDictionary *box;
+@property (nonatomic) NSUInteger generation;
+@property (nonatomic, strong) dispatch_group_t previous;
 @end
 @implementation WQScanSlot
 @end
@@ -1867,6 +2695,14 @@ static void wq_scan_slots_clear(void)
         WQScanSlot *slot = wq_scan_slot(i == 1);
         slot.scan = nil;
         slot.at = 0;
+        slot.generation++;
+        // A running worker keeps its own waiters but no longer serves new
+        // callers or fills the slot.
+        if (slot.group) {
+            slot.previous = slot.group;
+            slot.group = nil;
+            slot.box = nil;
+        }
     }
 }
 
@@ -1877,7 +2713,7 @@ static NSArray<NSString *> *wq_shared_children(NSString *base, fsid_t fsid, WQSc
     NSUInteger baseIndex = [wq_shared_scan_roots() indexOfObject:base];
     // iOS 26 lists apps and extensions from the LaunchServices database; only
     // Internal Daemons need the (long) id scan.
-    BOOL inodeOnly = !wq_system_areas_reachable() && [base isEqualToString:@"/private/var/mobile/Containers/Data/InternalDaemon"];
+    BOOL inodeOnly = [base isEqualToString:@"/private/var/mobile/Containers/Data/InternalDaemon"];
     WQScanSlot *slot = wq_scan_slot(inodeOnly);
     id owner = [NSObject new];
     dispatch_group_t group = nil;
@@ -1899,24 +2735,39 @@ static NSArray<NSString *> *wq_shared_children(NSString *base, fsid_t fsid, WQSc
             qos_class_t qos = progress ? QOS_CLASS_USER_INITIATED : QOS_CLASS_UTILITY;
             dispatch_group_t started = dispatch_group_create();
             NSMutableDictionary *startedBox = [NSMutableDictionary new];
+            NSUInteger generation = slot.generation;
+            dispatch_group_t previous = slot.previous;
+            slot.previous = nil;
             slot.group = started;
             slot.box = startedBox;
             dispatch_group_enter(started);
             dispatch_async(dispatch_get_global_queue(qos, 0), ^{
+                // A worker detached by an invalidation finishes first.
+                if (previous) dispatch_group_wait(previous, DISPATCH_TIME_FOREVER);
                 NSDictionary *scan = nil;
                 @try {
+#ifdef WQ_ACCESS_TESTING
+                    if (wq_test_shared_scan_runner) scan = wq_test_shared_scan_runner(inodeOnly);
+                    else
+#endif
                     scan = wq_run_shared_scan(fsid, qos, inodeOnly);
                 } @catch (NSException *exception) {
                     wq_log(@"scan: exception %@", exception.reason);
                 }
                 @synchronized (gSharedScanGuard) {
                     if (scan) {
-                        startedBox[@"scan"] = scan;
-                        slot.scan = scan;
-                        slot.at = NSDate.date.timeIntervalSinceReferenceDate;
+                        startedBox[@"scan"] = scan;   // its own waiters asked before any invalidation
+                        if (slot.generation == generation) {
+                            slot.scan = scan;
+                            slot.at = NSDate.date.timeIntervalSinceReferenceDate;
+                        } else {
+                            wq_log(@"scan: result started before a refresh not kept");
+                        }
                     }
-                    slot.group = nil;
-                    slot.box = nil;
+                    if (slot.group == started) {
+                        slot.group = nil;
+                        slot.box = nil;
+                    }
                 }
                 dispatch_group_leave(started);
             });
@@ -1974,8 +2825,11 @@ NSArray<NSString *> *wq_enumerate(NSString *dir, int64_t maxInode, WQScanCancell
             NSMutableArray *groups = [NSMutableArray new];
             for (NSString *path in all)
                 if ([wq_norm(path).stringByDeletingLastPathComponent isEqualToString:base]) [groups addObject:wq_norm(path)];
+            NSUInteger stale = 0;
+            groups = [wq_existing_containers(groups, &stale) mutableCopy];
             [groups sortUsingSelector:@selector(compare:)];
-            wq_log(@"enumerate %@: %lu group containers from the LaunchServices database", dir, (unsigned long)groups.count);
+            wq_log(@"enumerate %@: %lu group containers from the LaunchServices database%@", dir, (unsigned long)groups.count,
+                   stale ? [NSString stringWithFormat:@" (%lu no longer exist, skipped)", (unsigned long)stale] : @"");
             if (progress) progress(1, 1, groups.count);
             return groups;
         }
@@ -1992,8 +2846,28 @@ NSArray<NSString *> *wq_enumerate(NSString *dir, int64_t maxInode, WQScanCancell
         wq_log(@"enumerate %@: inode bound is too large to scan safely", dir);
         return nil;
     }
-    NSArray *lists = wq_scan_children(fsid, 1, maxInode, @[base], cancellation, QOS_CLASS_USER_INITIATED,
-        progress ? ^(int64_t done, int64_t total, const NSUInteger *counts) { progress(done, total, counts[0]); } : nil);
+    WQScanCancellation *stop = nil;
+    if (dynamicBound) {
+        stop = wq_full_scan_begin(base.lastPathComponent, maxInode, wq_full_scan_estimate(maxInode, 0), cancellation);
+        if (!stop) return nil;
+    }
+    // Either the caller's cancellation or the scan window's Stop ends it.
+    WQScanCancellation *either = stop ?: cancellation;
+    if (stop && cancellation) {
+        either = [WQScanCancellation new];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            while (!either.isCancelled) {
+                if (stop.isCancelled || cancellation.isCancelled) { [either cancel]; break; }
+                usleep(200000);
+            }
+        });
+    }
+    NSArray *lists = wq_scan_children(fsid, 1, maxInode, @[base], either, QOS_CLASS_USER_INITIATED, stop != nil,
+        ^(int64_t done, int64_t total, const NSUInteger *counts) {
+            if (progress) progress(done, total, counts[0]);
+            if (stop && gFullScanProgress) gFullScanProgress(done, total, NO);
+        });
+    if (stop) { wq_full_scan_end(stop); [either cancel]; }
     if (!lists) return nil;
     if (dynamicBound) wq_check_scan_completion(fsid, probeInode, dir);
     return wq_sorted_paths(lists.firstObject);
@@ -2127,8 +3001,38 @@ static BOOL wq_remove_entry(int parent, NSString *name, NSString *path, unsigned
         if (fstatat(parent, item, &current, AT_SYMLINK_NOFOLLOW) != 0 || !WQSameObject(&before, &current)) return NO;
         rc = unlinkat(parent, item, directory ? AT_REMOVEDIR : 0);
     }
+    // A user-immutable or append-only flag (on the item or its folder) makes
+    // unlink fail with EPERM even for the owner. The owner may clear those
+    // flags, so clear them and try once more. System flags stay untouched.
+    if (rc != 0 && errno == EPERM &&
+        fstatat(parent, item, &current, AT_SYMLINK_NOFOLLOW) == 0 && WQSameObject(&before, &current)) {
+        const uint32_t userLocks = UF_IMMUTABLE | UF_APPEND;
+        struct stat parentStat = {0};
+        BOOL cleared = NO;
+        if (fstat(parent, &parentStat) == 0 && (parentStat.st_flags & userLocks))
+            cleared = fchflags(parent, parentStat.st_flags & ~userLocks) == 0;
+        if ((current.st_flags & userLocks) && !S_ISLNK(current.st_mode)) {
+            int flagsFd = openat(parent, item, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC |
+                                 (directory ? O_DIRECTORY : 0));
+            struct stat opened;
+            if (flagsFd >= 0 && fstat(flagsFd, &opened) == 0 && WQSameObject(&before, &opened) &&
+                fchflags(flagsFd, opened.st_flags & ~userLocks) == 0) cleared = YES;
+            if (flagsFd >= 0) close(flagsFd);
+        }
+        if (cleared) {
+            wq_log(@"purge: cleared lock flags (item 0x%x, folder 0x%x) on %@",
+                   current.st_flags, parentStat.st_flags, path);
+            rc = unlinkat(parent, item, directory ? AT_REMOVEDIR : 0);
+        } else {
+            errno = EPERM;
+        }
+    }
     if (rc == 0 && !directory && freed) *freed += (unsigned long long)before.st_size;
-    if (rc != 0) wq_log(@"purge: %@ -> %@", path, wq_errno(errno));
+    if (rc != 0) {
+        int err = errno;
+        wq_log(@"purge: %@ -> %@ (flags 0x%x, uid %u, mode %o)", path, wq_errno(err),
+               current.st_flags, current.st_uid, current.st_mode & 07777);
+    }
     return rc == 0;
 }
 
@@ -2187,16 +3091,47 @@ static BOOL wq_sync_entry(int parent, NSString *name)
     return ok;
 }
 
-BOOL wq_copy_contents(NSString *srcDir, NSString *dstDir, NSString **errorText)
+// Sockets, FIFOs and device files can't be copied (NSFileManager fails the
+// whole tree with "couldn't be copied", ENOTSUP) and hold no data: apps leave
+// sockets in tmp and Library. They show as 0 KB files (issue #48). The copy
+// leaves them out; every other error still stops it.
+@interface WQSkipSpecialFiles : NSObject <NSFileManagerDelegate>
+@property (nonatomic) NSUInteger skipped;
+@end
+
+static BOOL wq_is_special_file(NSString *path)
+{
+    struct stat st;
+    if (lstat(path.fileSystemRepresentation, &st) != 0) return NO;
+    return S_ISSOCK(st.st_mode) || S_ISFIFO(st.st_mode) || S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode);
+}
+
+@implementation WQSkipSpecialFiles
+- (BOOL)fileManager:(NSFileManager *)fm shouldProceedAfterError:(NSError *)error
+  copyingItemAtPath:(NSString *)src toPath:(NSString *)dst
+{
+    (void)fm; (void)error; (void)dst;
+    if (!wq_is_special_file(src)) return NO;
+    self.skipped++;
+    return YES;
+}
+@end
+
+// `replace`: a same-named destination item is swapped out (restore callers);
+// otherwise installation is RENAME_EXCL and such an item fails the copy.
+static BOOL wq_copy_contents_mode(NSString *srcDir, NSString *dstDir, BOOL replace,
+                                  BOOL (^cancelled)(void), NSString **errorText)
 {
     srcDir = WQCanonicalVarPath(srcDir);
     dstDir = WQCanonicalVarPath(dstDir);
     if (!WQAbsolutePathGrammar(srcDir) || !WQAbsolutePathGrammar(dstDir) || [srcDir isEqual:dstDir] ||
         [srcDir hasPrefix:[dstDir stringByAppendingString:@"/"]] || [dstDir hasPrefix:[srcDir stringByAppendingString:@"/"]]) {
-        if (errorText) *errorText = @"源和目标树重叠或路径无效";
+        if (errorText) *errorText = WQLocalized(@"Source and destination trees overlap or have invalid paths");
         return NO;
     }
-    NSFileManager *fm = NSFileManager.defaultManager;
+    NSFileManager *fm = [NSFileManager new];
+    WQSkipSpecialFiles *skipper = [WQSkipSpecialFiles new];
+    fm.delegate = skipper;
     int source = wq_open_directory(srcDir);
     if (source < 0) { if (errorText) *errorText = wq_errno(errno); return NO; }
     int destination = WQCreateDirectoriesNoLinksMode(dstDir, 0755);
@@ -2204,23 +3139,25 @@ BOOL wq_copy_contents(NSString *srcDir, NSString *dstDir, NSString **errorText)
         destination = WQCreateDirectoriesNoLinksMode(dstDir, 0755);
     struct stat srcStat, dstStat;
     if (destination < 0 || fstat(source, &srcStat) != 0 || fstat(destination, &dstStat) != 0 || WQSameObject(&srcStat, &dstStat)) {
-        if (errorText) *errorText = @"无法安全打开不同的源和目标文件夹";
+        if (errorText) *errorText = WQLocalized(@"Cannot safely open distinct source and destination folders");
         close(source); if (destination >= 0) close(destination); return NO;
     }
     NSError *error = nil;
     NSArray *children = [fm contentsOfDirectoryAtPath:srcDir error:&error];
     if (!children) {
-        if (errorText) *errorText = error.localizedDescription ?: @"无法读取源文件夹";
+        if (errorText) *errorText = error.localizedDescription ?: WQLocalized(@"Cannot read the source folder");
         close(source); close(destination); return NO;
     }
     BOOL allOk = YES;
     NSString *firstFailure = nil;
     for (NSString *name in children) {
+        if (cancelled && cancelled()) { allOk = NO; firstFailure = firstFailure ?: @"Cancelled"; break; }
         if (!wq_directory_current(srcDir, source) || !wq_directory_current(dstDir, destination)) {
-            allOk = NO; firstFailure = firstFailure ?: @"拷贝期间某个拷贝根发生了变化"; break;
+            allOk = NO; firstFailure = firstFailure ?: WQLocalized(@"A copy root changed during copying"); break;
         }
         NSString *src = [srcDir stringByAppendingPathComponent:name];
         NSString *dst = [dstDir stringByAppendingPathComponent:name];
+        if (wq_is_special_file(src)) { skipper.skipped++; continue; }
         NSString *stageName = [@".wq-copy-stage-" stringByAppendingString:NSUUID.UUID.UUIDString];
         NSString *stagePath = [dstDir stringByAppendingPathComponent:stageName];
         if (mkdirat(destination, stageName.fileSystemRepresentation, 0700) != 0) {
@@ -2250,7 +3187,10 @@ BOOL wq_copy_contents(NSString *srcDir, NSString *dstDir, NSString **errorText)
             if (ok) {
                 // Swap retains the previous destination at stage/New until the
                 // copy has completed and the new namespace has been flushed.
-                installed = renameatx_np(stage, "New", destination, name.fileSystemRepresentation, exists ? RENAME_SWAP : RENAME_EXCL) == 0;
+                // Without `replace`, RENAME_EXCL fails (EEXIST) on any item
+                // that appeared meanwhile, and that item stays untouched.
+                installed = renameatx_np(stage, "New", destination, name.fileSystemRepresentation,
+                                         exists && replace ? RENAME_SWAP : RENAME_EXCL) == 0;
                 ok = installed && fsync(destination) == 0 && fsync(stage) == 0;
             }
         }
@@ -2262,15 +3202,50 @@ BOOL wq_copy_contents(NSString *srcDir, NSString *dstDir, NSString **errorText)
         if (cleaned) cleaned = unlinkat(destination, stageName.fileSystemRepresentation, AT_REMOVEDIR) == 0 && fsync(destination) == 0;
         if (!ok || !cleaned) {
             allOk = NO;
-            NSString *message = cleaned ? failure : [NSString stringWithFormat:@"%@；暂存/恢复内容保留在 %@", failure ?: wq_errno(errno), stagePath];
+            NSString *message = cleaned ? failure : [NSString stringWithFormat:@"%@; staging/recovery contents retained at %@", failure ?: wq_errno(errno), stagePath];
             firstFailure = firstFailure ?: message;
             wq_log(@"copy: %@ -> %@: %@", src, dst, message);
         }
     }
     close(source); close(destination);
     if (errorText && !allOk) *errorText = firstFailure;
-    wq_log(@"copy: %@ -> %@ (%lu items) %@", srcDir, dstDir, (unsigned long)children.count, allOk ? @"OK" : @"with errors");
+    wq_log(@"copy: %@ -> %@ (%lu items) %@%@", srcDir, dstDir, (unsigned long)children.count, allOk ? @"OK" : @"with errors",
+           skipper.skipped ? [NSString stringWithFormat:@"; %lu sockets or pipes left out", (unsigned long)skipper.skipped] : @"");
     return allOk;
+}
+
+BOOL wq_copy_contents(NSString *srcDir, NSString *dstDir, NSString **errorText)
+{
+    return wq_copy_contents_mode(srcDir, dstDir, YES, nil, errorText);
+}
+
+BOOL wq_copy_tree_new(NSString *srcDir, NSString *dstDir, BOOL (^cancelled)(void), NSString **errorText)
+{
+    NSString *parent = dstDir.stringByDeletingLastPathComponent;
+    NSString *stage = [parent stringByAppendingPathComponent:[@".wq-new-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+    struct stat st;
+    if (wq_stat(dstDir, &st)) {
+        if (errorText) *errorText = WQLocalized(@"An item with that name already exists");
+        return NO;
+    }
+    if (!wq_create_dir(stage, errorText)) return NO;
+    NSString *error = nil;
+    BOOL ok = wq_copy_contents_mode(srcDir, stage, NO, cancelled, &error);
+    WQ_TREE_HOOK(@"publishReady", dstDir);
+    if (ok && cancelled && cancelled()) { ok = NO; error = @"Cancelled"; }
+    // Publication: one no-replace rename, after which the copy is complete.
+    if (ok) ok = wq_rename(stage, dstDir.lastPathComponent, &error);
+    if (!ok) {
+        // Only this call's private staging folder is removed (no backups).
+        unsigned long long freed = 0;
+        BOOL removed = wq_purge_contents(stage, &freed) && wq_delete(stage, NULL);
+        if (!removed) {
+            wq_log(@"copy tree: could not remove staging folder %@", stage);
+            error = WQLocalizedFormat(@"%@ An unfinished copy remains in %@.", error ?: WQLocalized(@"Copying failed."), stage.lastPathComponent);
+        }
+    }
+    if (!ok && errorText) *errorText = error ?: WQLocalized(@"Copying failed.");
+    return ok;
 }
 
 // Container-manager enumeration is a second, permission-independent way to
@@ -2278,17 +3253,23 @@ BOOL wq_copy_contents(NSString *srcDir, NSString *dstDir, NSString **errorText)
 // used by terminal_worse (GPL-3.0); no part-domain traversal is involved. The UUID xattr and the root-only
 // metadata plist are the fast paths; this query is the fallback for devices
 // or containers where either is unavailable. Paths and identifiers stay in a
-// short-lived cache because labels are requested for every row.
-static NSDictionary<NSString *, NSString *> *wq_container_identifier_map(void)
+// short-lived cache because labels are requested for every row; it is
+// rebuilt after an explicit refresh and its entries are identity-bound like
+// the LaunchServices API labels.
+static NSString *wq_container_identifier_lookup(NSString *key, WQLabelIdentity state, NSArray<NSNumber *> *current)
 {
     static NSObject *lock;
     static NSDictionary<NSString *, NSString *> *cached;
+    static NSMutableDictionary<NSString *, NSArray<NSNumber *> *> *identities;
     static NSTimeInterval cachedAt;
+    static NSUInteger cachedGeneration;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ lock = [NSObject new]; });
     @synchronized (lock) {
         NSTimeInterval now = NSDate.date.timeIntervalSinceReferenceDate;
-        if (cached && now - cachedAt < 60) return cached;
+        NSUInteger generation = atomic_load(&gWQLabelGeneration);
+        if (!cached || now - cachedAt >= 60 || generation != cachedGeneration) {
+        identities = [NSMutableDictionary new];
 
         NSMutableDictionary<NSString *, NSString *> *map = [NSMutableDictionary new];
         void *mgr = dlopen("/usr/lib/system/libsystem_containermanager.dylib", RTLD_NOW | RTLD_LOCAL);
@@ -2314,8 +3295,12 @@ static NSDictionary<NSString *, NSString *> *wq_container_identifier_map(void)
                         NSString *p = [NSString stringWithUTF8String:path];
                         NSString *v = [NSString stringWithUTF8String:ident];
                         if (!p.length || !v.length) return true;
-                        NSString *key = WQCanonicalVarPath(p);
-                        if (key.length && !map[key]) map[key] = v;
+                        NSString *pathKey = WQCanonicalVarPath(p);
+                        if (pathKey.length && !map[pathKey]) {
+                            map[pathKey] = v;
+                            NSArray<NSNumber *> *identity = nil;
+                            if (wq_label_identity(pathKey, &identity) == WQLabelIdentityKnown) identities[pathKey] = identity;
+                        }
                         return true;
                     });
                     freeQuery(query);
@@ -2325,7 +3310,15 @@ static NSDictionary<NSString *, NSString *> *wq_container_identifier_map(void)
         }
         cached = map;
         cachedAt = now;
-        return cached;
+        cachedGeneration = generation;
+        }
+        NSString *value = cached[key];
+        if (!value.length) return nil;
+        if (!wq_label_identity_matches(identities, key, state, current)) {
+            wq_log(@"label: container manager id for %@ belongs to an earlier folder; not used", key.lastPathComponent);
+            return nil;
+        }
+        return value;
     }
 }
 
@@ -2354,11 +3347,25 @@ NSString *wq_container_label(NSString *dir)
     }
     // Prefer the container-manager query over the metadata plist: it needs no
     // file permission and can also label containers whose plist is root-only.
+    NSArray<NSNumber *> *identity = nil;
+    WQLabelIdentity state = wq_label_identity(dir, &identity);
     NSString *fromAPI = nil;
-    @synchronized (NSNull.null) { fromAPI = gLSAPILabels[wq_norm(dir)]; }
-    if (fromAPI.length) return fromAPI;
-    NSString *queried = wq_container_identifier_map()[WQCanonicalVarPath(dir)];
-    if (queried.length) return queried;
+    @synchronized (NSNull.null) {
+        NSString *key = wq_norm(dir);
+        fromAPI = gLSAPILabels[key];
+        if (fromAPI.length && gLSAPIIdentities && !wq_label_identity_matches(gLSAPIIdentities, key, state, identity)) {
+            wq_log(@"label: LaunchServices API id for %@ belongs to an earlier folder; not used", key.lastPathComponent);
+            fromAPI = nil;
+        }
+    }
+    NSString *queried = wq_container_identifier_lookup(WQCanonicalVarPath(dir), state, identity);
+    // Two caches that disagree about the same folder: trust neither.
+    if (fromAPI.length && queried.length && ![fromAPI isEqualToString:queried]) {
+        wq_log(@"label: cached ids for %@ disagree (%@, %@); asking LaunchServices", dir.lastPathComponent, fromAPI, queried);
+    } else {
+        if (fromAPI.length) return fromAPI;
+        if (queried.length) return queried;
+    }
     // The LaunchServices database maps app and extension data containers to
     // bundle ids (set by the app; this file doesn't depend on that module).
     NSString *resolved = gContainerLabelResolver ? gContainerLabelResolver(WQCanonicalVarPath(dir)) : nil;

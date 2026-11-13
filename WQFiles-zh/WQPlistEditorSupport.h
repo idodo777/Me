@@ -6,6 +6,10 @@
 //
 
 #import <Foundation/Foundation.h>
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
+#include <stdlib.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -43,15 +47,15 @@ static inline NSString *WQPlistFormatName(NSPropertyListFormat format)
 {
     switch (format) {
         case NSPropertyListXMLFormat_v1_0: return @"XML";
-        case NSPropertyListBinaryFormat_v1_0: return @"二进制";
+        case NSPropertyListBinaryFormat_v1_0: return @"Binary";
         case NSPropertyListOpenStepFormat: return @"OpenStep";
-        default: return @"未知";
+        default: return @"Unknown";
     }
 }
 
 static inline NSString *WQPBoundedStringPreview(NSString *value)
 {
-    if (value.length == 0) return @"（空）";
+    if (value.length == 0) return @"(empty)";
     if (value.length <= WQPMaxDisplayedStringCharacters) return value;
 
     NSString *suffix = [NSString stringWithFormat:@" … (%lu chars)", (unsigned long)value.length];
@@ -80,7 +84,7 @@ static inline BOOL WQPlistIsKeyedArchiveUID(id value)
 static inline id _Nullable WQPlistImmutableCopy(id value, NSString *_Nullable *_Nullable errorOut)
 {
     if (!value) {
-        if (errorOut) *errorOut = @"属性列表包含空值（nil）。";
+        if (errorOut) *errorOut = @"The property list contains a nil value.";
         return nil;
     }
     if (WQPlistIsKeyedArchiveUID(value)) return value;
@@ -89,7 +93,7 @@ static inline id _Nullable WQPlistImmutableCopy(id value, NSString *_Nullable *_
         NSMutableDictionary *copy = [NSMutableDictionary dictionaryWithCapacity:source.count];
         for (id key in source) {
             if (![key isKindOfClass:NSString.class]) {
-                if (errorOut) *errorOut = @"字典的键不是字符串。";
+                if (errorOut) *errorOut = @"A dictionary key is not a string.";
                 return nil;
             }
             id child = WQPlistImmutableCopy(source[key], errorOut);
@@ -112,8 +116,67 @@ static inline id _Nullable WQPlistImmutableCopy(id value, NSString *_Nullable *_
         [value isKindOfClass:NSDate.class] || [value isKindOfClass:NSData.class]) {
         return [value copy];
     }
-    if (errorOut) *errorOut = @"属性列表包含不支持的值。";
+    if (errorOut) *errorOut = @"The property list contains an unsupported value.";
     return nil;
+}
+
+// Date text for the scalar editor. Whole-second dates keep the short form
+// (2026-11-09T15:00:00Z); dates with a fraction show milliseconds so the
+// value the user sees is the value that is written back. The editor also
+// keeps the original NSDate when the text is left unchanged, which preserves
+// sub-millisecond precision exactly.
+static inline NSISO8601DateFormatter *WQPDateFormatter(BOOL fractional)
+{
+    static NSISO8601DateFormatter *whole, *fraction;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        whole = [NSISO8601DateFormatter new];
+        fraction = [NSISO8601DateFormatter new];
+        fraction.formatOptions = NSISO8601DateFormatWithInternetDateTime | NSISO8601DateFormatWithFractionalSeconds;
+    });
+    return fractional ? fraction : whole;
+}
+
+static inline NSString *WQPDateText(NSDate *date)
+{
+    NSTimeInterval t = date.timeIntervalSinceReferenceDate;
+    return [WQPDateFormatter(t != floor(t)) stringFromDate:date];
+}
+
+static inline NSDate *_Nullable WQPParseDate(NSString *text)
+{
+    NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!trimmed.length) return nil;
+    return [WQPDateFormatter(NO) dateFromString:trimmed] ?: [WQPDateFormatter(YES) dateFromString:trimmed];
+}
+
+// Whole numbers: optional sign and ASCII digits only. Values from LLONG_MIN
+// through ULLONG_MAX are accepted exactly (above LLONG_MAX as an unsigned
+// 64-bit NSNumber); anything outside is rejected instead of being clamped.
+static inline NSNumber *_Nullable WQPParseInteger(NSString *text)
+{
+    NSString *t = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!t.length || t.length > 64) return nil;
+    unichar first = [t characterAtIndex:0];
+    BOOL negative = first == '-';
+    NSUInteger start = (first == '-' || first == '+') ? 1 : 0;
+    if (start >= t.length) return nil;
+    for (NSUInteger i = start; i < t.length; i++) {
+        unichar c = [t characterAtIndex:i];
+        if (c < '0' || c > '9') return nil;
+    }
+    const char *digits = t.UTF8String;   // ASCII only at this point
+    char *end = NULL;
+    errno = 0;
+    if (negative) {
+        long long value = strtoll(digits, &end, 10);
+        if (errno == ERANGE || !end || *end) return nil;
+        return @(value);
+    }
+    unsigned long long value = strtoull(digits, &end, 10);
+    if (errno == ERANGE || !end || *end) return nil;
+    if (value <= (unsigned long long)LLONG_MAX) return @((long long)value);
+    return [NSNumber numberWithUnsignedLongLong:value];
 }
 
 NS_ASSUME_NONNULL_END

@@ -7,6 +7,7 @@
 #import "WQSharing.h"
 #import "WQUI.h"
 #import "WQAccess.h"
+#import "WQArchive.h"
 #import <objc/runtime.h>
 #import <sys/stat.h>
 
@@ -35,6 +36,26 @@ static NSString *wq_unique_export_directory(void)
 static void wq_remove_export(NSString *exportDir)
 {
     if (exportDir.length) [NSFileManager.defaultManager removeItemAtPath:exportDir error:nil];
+}
+
+void wq_share_sweep_stale_exports(void)
+{
+    dispatch_async(wq_io(), ^{
+        NSFileManager *fm = NSFileManager.defaultManager;
+        NSString *tmp = NSTemporaryDirectory();
+        NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-3600];
+        NSUInteger removed = 0;
+        for (NSString *name in [fm contentsOfDirectoryAtPath:tmp error:nil]) {
+            if (![name hasPrefix:@"WQShare-"]) continue;
+            NSString *dir = [tmp stringByAppendingPathComponent:name];
+            NSDictionary *attrs = [fm attributesOfItemAtPath:dir error:nil];   // lstat: a link is never followed
+            if (![attrs.fileType isEqualToString:NSFileTypeDirectory]) continue;
+            NSDate *modified = attrs.fileModificationDate;
+            if (modified && [modified compare:cutoff] == NSOrderedDescending) continue;   // may still be in use
+            if ([fm removeItemAtPath:dir error:nil]) removed++;
+        }
+        if (removed) wq_log(@"share: removed %lu stale export folder(s)", (unsigned long)removed);
+    });
 }
 
 static BOOL wq_share_host_is_active(UIViewController *host)
@@ -121,7 +142,7 @@ void wq_share(UIViewController *host, NSString *path, UIView *source)
 {
     if (!host) return;
     if (wq_share_in_flight(host)) {
-        wq_alert(host, @"分享进行中", @"请等当前分享完成后再开始新的分享。");
+        wq_alert(host, @"Share in progress", @"Wait for the current share to finish before starting another.");
         return;
     }
     objc_setAssociatedObject(host, &kWQShareInFlightKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -132,7 +153,7 @@ void wq_share(UIViewController *host, NSString *path, UIView *source)
         NSString *tmp = nil;
         BOOL ok = NO;
         if (!wq_shareable_regular_file(path)) {
-            error = @"只能分享普通文件。";
+            error = @"Only regular files can be shared.";
         } else {
             outDir = wq_unique_export_directory();
             tmp = outDir ? [outDir stringByAppendingPathComponent:path.lastPathComponent] : nil;
@@ -144,7 +165,7 @@ void wq_share(UIViewController *host, NSString *path, UIView *source)
                 wq_remove_export(outDir);
                 wq_clear_in_flight(strongHost);
                 if (wq_share_host_is_active(strongHost)) {
-                    wq_alert(strongHost, @"无法分享", error ?: @"无法创建临时导出文件夹");
+                    wq_alert(strongHost, @"Cannot share", error ?: @"Could not create a temporary export folder");
                 }
                 return;
             }
@@ -159,24 +180,23 @@ void wq_share(UIViewController *host, NSString *path, UIView *source)
 
 static NSString *wq_zip_name(NSString *dir);
 
-// Zips a folder (the system's own zipper via NSFileCoordinator) and opens the
+// Zips a folder (WQ Files' own ZIP writer) and opens the
 // share sheet, so a backup can go out over AirDrop, Files, Mail…
 void wq_share_folder(UIViewController *host, NSString *dir, NSString *zipName, UIView *source)
 {
     if (!wq_share_host_is_active(host)) return;
     if (wq_share_in_flight(host)) {
-        wq_alert(host, @"分享进行中", @"请等当前分享完成后再开始新的分享。");
+        wq_alert(host, @"Share in progress", @"Wait for the current share to finish before starting another.");
         return;
     }
     WQSharePreparation *preparation = [WQSharePreparation new];
     preparation.host = host;
-    UIAlertController *hud = [UIAlertController alertControllerWithTitle:@"正在准备…"
-        message:@"正在压缩文件夹" preferredStyle:UIAlertControllerStyleAlert];
-    [hud addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *__unused action) {
+    UIAlertController *hud = wq_alert_controller(@"Preparing…", @"Compressing the folder", UIAlertControllerStyleAlert);
+    [hud addAction:wq_alert_action(@"Cancel", UIAlertActionStyleCancel, ^(UIAlertAction *__unused action) {
         preparation.cancelled = YES;
         objc_setAssociatedObject(host, &kWQSharePreparationKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [host dismissViewControllerAnimated:YES completion:nil];
-    }]];
+    })];
     preparation.hud = hud;
     objc_setAssociatedObject(host, &kWQSharePreparationKey, preparation, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     [host presentViewController:hud animated:YES completion:nil];
@@ -188,20 +208,25 @@ void wq_share_folder(UIViewController *host, NSString *dir, NSString *zipName, U
         NSString *outDir = wq_unique_export_directory();
         preparation.exportDir = outDir;
         NSString *zip = outDir ? [outDir stringByAppendingPathComponent:[safe stringByAppendingPathExtension:@"zip"]] : nil;
-        NSFileManager *fm = NSFileManager.defaultManager;
+        // WQ Files' own ZIP writer, reading through access tokens. iOS's
+        // folder zipper (NSFileCoordinator) gives up on the whole folder when
+        // one file refuses reading, and every app folder holds a root-only
+        // metadata plist; those files are left out here instead.
         wq_grant(dir);
-        __block NSError *copyError = nil;
-        NSError *coordError = nil;
-        if (zip && !preparation.isCancelled) {
-            [[NSFileCoordinator new] coordinateReadingItemAtURL:[NSURL fileURLWithPath:dir]
-                                                        options:NSFileCoordinatorReadingForUploading
-                                                          error:&coordError byAccessor:^(NSURL *zipped) {
-                if (!preparation.isCancelled) [fm copyItemAtURL:zipped toURL:[NSURL fileURLWithPath:zip] error:&copyError];
-            }];
-        }
-        BOOL ok = zip && !preparation.isCancelled && [fm fileExistsAtPath:zip];
-        NSString *why = (coordError ?: copyError).localizedDescription ?: @"无法创建 ZIP";
-        wq_log(@"share zip: %@ -> %@ %@", dir, zip.lastPathComponent, ok ? @"OK" : why);
+        WQArchiveIO *io = [WQArchiveIO new];
+        io.stat = ^BOOL(NSString *path, struct stat *st) { return wq_stat(path, st); };
+        io.list = ^NSArray<NSString *> *(NSString *path) { return wq_list(path, NULL); };
+        io.openRead = ^int(NSString *path) { return wq_open_for_reading(path); };
+        io.skipUnreadable = YES;
+        io.expectedUnreadableNames = [NSSet setWithObject:@".com.apple.mobile_container_manager.metadata.plist"];
+        NSUInteger skipped = 0;
+        NSString *zipError = nil;
+        BOOL ok = zip && !preparation.isCancelled &&
+            wq_zip_write(@[dir], zip, io, ^BOOL { return preparation.isCancelled; }, nil, &skipped, &zipError);
+        NSString *why = zipError ?: @"Could not create the ZIP";
+        wq_log(@"share zip: %@ -> %@ %@ (%lu unreadable, %lu container metadata, %lu links or special files left out)", dir,
+               zip.lastPathComponent, ok ? @"OK" : why, (unsigned long)io.unreadable, (unsigned long)io.expectedUnreadable, (unsigned long)skipped);
+        NSUInteger unreadable = io.unreadable;
         dispatch_async(dispatch_get_main_queue(), ^{
             UIViewController *strongHost = preparation.host;
             BOOL hudPresented = strongHost && strongHost.presentedViewController == hud;
@@ -211,11 +236,26 @@ void wq_share_folder(UIViewController *host, NSString *dir, NSString *zipName, U
                 if (!ok || stale) {
                     wq_remove_export(outDir);
                     if (!stale && wq_share_host_is_active(strongHost)) {
-                        wq_alert(strongHost, @"无法分享", why);
+                        wq_alert(strongHost, @"Cannot share", why);
                     }
                     return;
                 }
-                if (!wq_present_share(strongHost, zip, outDir, source)) wq_remove_export(outDir);
+                if (unreadable == 0) {
+                    if (!wq_present_share(strongHost, zip, outDir, source)) wq_remove_export(outDir);
+                    return;
+                }
+                // Say that the ZIP is incomplete before it goes anywhere.
+                NSString *note = unreadable == 1
+                    ? WQLocalized(@"1 item couldn't be read (no permission) and is not in the ZIP.")
+                    : WQLocalizedFormat(@"%lu items couldn't be read (no permission) and are not in the ZIP.", (unsigned long)unreadable);
+                UIAlertController *ask = wq_alert_controller(@"Some items left out", note, UIAlertControllerStyleAlert);
+                [ask addAction:wq_alert_action(@"Cancel", UIAlertActionStyleCancel, ^(UIAlertAction *__unused a) {
+                    wq_remove_export(outDir);
+                })];
+                [ask addAction:wq_alert_action(@"Share", UIAlertActionStyleDefault, ^(UIAlertAction *__unused a) {
+                    if (!wq_present_share(strongHost, zip, outDir, source)) wq_remove_export(outDir);
+                })];
+                [strongHost presentViewController:ask animated:YES completion:nil];
             };
             if (hudPresented) [strongHost dismissViewControllerAnimated:YES completion:finish];
             else finish();
@@ -234,7 +274,7 @@ static NSString *wq_zip_name(NSString *dir)
     }
     if (i != NSNotFound && i + 1 == parts.count - 1) {
         NSString *bid = parts.lastObject;
-        return [NSString stringWithFormat:@"%@ 的备份", wq_display_name(bid) ?: bid];
+        return [NSString stringWithFormat:@"%@ backups", wq_display_name(bid) ?: bid];
     }
     return dir.lastPathComponent;
 }
