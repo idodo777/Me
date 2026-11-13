@@ -1479,6 +1479,22 @@ void wq_enumerate_invalidate(void)
     @synchronized (gSharedScanGuard) { wq_scan_slots_clear(); }
 }
 
+BOOL wq_scan_cache_clear(void)
+{
+    NSString *path = wq_scan_cache_path();
+    if (path) {
+        NSError *error = nil;
+        if (![NSFileManager.defaultManager removeItemAtPath:path error:&error] &&
+            error.code != NSFileNoSuchFileError) {
+            wq_log(@"scan: cannot clear the saved container list at %@ (%@)", path, error.localizedDescription ?: @"?");
+            return NO;
+        }
+        wq_log(@"scan: saved container list cleared; next enumeration runs a full scan");
+    }
+    wq_enumerate_invalidate();
+    return YES;
+}
+
 
 // The first few path components, with UUIDs collapsed, so the Log shows which
 // areas are visible without listing individual files.

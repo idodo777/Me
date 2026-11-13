@@ -116,6 +116,12 @@ BOOL wq_stat(NSString *path, struct stat *st);
 // so the next wq_enumerate of those scans the ids created since. Call on a
 // user's refresh.
 void wq_enumerate_invalidate(void);
+// Deletes the saved container scan (Library/Caches/wq-container-scan.plist)
+// and forgets the shared scan, so the next enumeration runs a full scan
+// instead of only checking the ids created since the saved one. Call from
+// the Log screen's clear-cache button. Returns YES when no saved scan
+// remains (deleted or never saved); NO when the file could not be removed.
+BOOL wq_scan_cache_clear(void);
 // NO on iOS 26: there worse_query can't reach System Data, the system groups
 // or the App Groups parent folder (only the individual containers).
 BOOL wq_system_areas_reachable(void);

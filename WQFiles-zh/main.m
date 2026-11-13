@@ -1470,6 +1470,7 @@ static NSString *const kSystemGroupRoot = @"/private/var/containers/Shared/Syste
 
 @implementation WQLogViewController {
     UITextView *_textView;
+    UIButton *_clearButton;
 }
 
 - (void)viewDidLoad
@@ -1482,8 +1483,35 @@ static NSString *const kSystemGroupRoot = @"/private/var/containers/Shared/Syste
     _textView.editable = NO;
     _textView.font = [UIFont monospacedSystemFontOfSize:11 weight:UIFontWeightRegular];
     [self.view addSubview:_textView];
+    _clearButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_clearButton setTitle:@"清除扫描缓存" forState:UIControlStateNormal];
+    _clearButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightSemibold];
+    [_clearButton addTarget:self action:@selector(clearScanCache) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:_clearButton];
     self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemAction
                                                                                            target:self action:@selector(share:)];
+}
+
+// The log text fills the screen above the clear-cache button.
+- (void)viewDidLayoutSubviews
+{
+    [super viewDidLayoutSubviews];
+    CGFloat height = 44;
+    CGFloat bottom = self.view.safeAreaInsets.bottom + 8;
+    _clearButton.frame = CGRectMake(16, CGRectGetHeight(self.view.bounds) - bottom - height,
+                                    CGRectGetWidth(self.view.bounds) - 32, height);
+    _textView.frame = CGRectMake(0, 0, CGRectGetWidth(self.view.bounds), CGRectGetMinY(_clearButton.frame) - 8);
+}
+
+// Drops the saved container scan so the next refresh runs a full scan and
+// finds containers the incremental scan missed (reused ids after reinstall).
+- (void)clearScanCache
+{
+    BOOL cleared = wq_scan_cache_clear();
+    _textView.text = [self fullLog];
+    wq_alert(self, cleared ? @"已清除扫描缓存" : @"清除失败",
+             cleared ? @"回到应用列表下拉刷新，将重新全量扫描，新安装或重装的应用会显示出来。"
+                     : @"无法删除保存的扫描结果，详见日志。");
 }
 
 // App version, device and iOS first, so a Log someone sends in says where it
