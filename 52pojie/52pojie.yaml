@@ -1,26 +1,22 @@
-name: 吾爱破解签到
+# 上游作者：Yuheng0101（脚本作者 ONZ3V）
+# 上游更新时间：2026-06-10（脚本 v1.1.5，@update 20260610）
+# 拦截数量：0
+# 脚本数量：2（http-request 抓 Cookie + cron 签到，均直连上游脚本，未移植）
+# 上游来源：https://github.com/Yuheng0101/X/blob/main/Tasks/52pojie.js
+name: 52破解
 description: 吾爱破解签到
-author: ONZ3V
+author: Yuheng0101
 homepage: https://www.52pojie.cn/home.php
-compat_arguments:
-  GETCK: "true"
-compat_arguments_schema:
-  GETCK:
-    name: "抓取Cookie"
-    description: "登录吾爱破解并刷新主页抓Cookie，抓到后关闭"
-    default_value: "true"
-    options:
-    - "true"
-    - "false"
+icon: https://raw.githubusercontent.com/Yuheng0101/X/main/Assets/52pojie.png
 scriptings:
 - http_request:
     name: 吾爱破解获取Cookie
     match: '^https://www\.52pojie\.cn/home\.php\?'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/ck_{{{GETCK}}}.js?v=1
+    script_url: https://raw.githubusercontent.com/Yuheng0101/X/main/Tasks/52pojie.js
 - schedule:
     name: 吾爱破解签到
-    cron: "30 10 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/52pojie/52pojie.js?v=1
+    cron: "0 9 * * *"
+    script_url: https://raw.githubusercontent.com/Yuheng0101/X/main/Tasks/52pojie.js
 mitm:
   hostnames:
     - www.52pojie.cn
