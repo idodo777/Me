@@ -1,3 +1,9 @@
+# 酷安去广告（Egern 版）
+# 原作: 小慧（转换自 ZenmoFeiShi / 怎么肥事、walala；feed/detail 与 replyList 补自 myouhi / xiaomaoJT 的公开去广告逻辑）
+# 上游来源: https://github.com/Yi-r8/Surge/blob/main/sgmodule/Kuan.sgmodule
+# 上游更新日期: 2026-11-14
+# 拦截数量: 34
+# 脚本数量: 0
 name: 酷安去广告
 description: 酷安去广告
 author: ZenmoFeiShi · walala · myouhi · xiaomaoJT（Surge 版：小慧）
@@ -20,6 +26,16 @@ rules:
     match:
     - domain_suffix:
         match: pangolin-sdk-toutiao-b.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: pangolin-sdk-toutiao1.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: pangolin-sdk-toutiao1.com
     - protocol:
         match: quic
     policy: REJECT
@@ -50,6 +66,16 @@ rules:
     match:
     - domain:
         match: ad.toutiao.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain:
+    match: tnc3-alisc1.zijieapi.com
+    policy: REJECT
+- and:
+    match:
+    - domain:
+        match: tnc3-alisc1.zijieapi.com
     - protocol:
         match: quic
     policy: REJECT
@@ -94,6 +120,26 @@ rules:
         match: quic
     policy: REJECT
 - domain_suffix:
+    match: e.qq.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: e.qq.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
+    match: tanx.com
+    policy: REJECT
+- and:
+    match:
+    - domain_suffix:
+        match: tanx.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- domain_suffix:
     match: kuaishouzt.com
     policy: REJECT
 - and:
@@ -134,12 +180,14 @@ rules:
         match: quic
     policy: REJECT
 url_rewrites:
+  - match: "^https?://api-access\\.pangolin-sdk-toutiao\\.com/api/ad/union/sdk"
+    location: "http://reject/"
   - match: "^https://api\\.coolapk\\.com/v6/search\\?.*type=hotSearch"
     location: "http://reject-dict/"
 body_rewrites:
   - response_jq:
       match: "^https://api\\.coolapk\\.com/v6/main/init"
-      filter: "if (.data | type) != \"array\" then . else del(.data[]? | select(.entityId == 944 or .entityId == 945 or .entityId == 24455 or .entityId == 36839 or .entityId == 1635 or .title == \"关注\")) | .data |= map(if .entities then .entities |= map(select(.entityId != 1635 and .entityId != 2261 and .entityId != 1633 and .entityId != 413 and .entityId != 417 and .entityId != 1754 and .entityId != 1966 and .entityId != 2274 and .entityId != 1170 and .entityId != 1175 and .entityId != 1190 and .entityId != 2258 and .title != \"关注\")) else . end) end"
+      filter: "if (.data | type) != \"array\" then . else .data |= map(if (.extraDataArr | type) == \"object\" then .extraDataArr |= with_entries(select(.key | (startswith(\"SplashAd\") or startswith(\"Ad.PRELOAD\") or startswith(\"Ad.SPLASH\") or startswith(\"Ad.ADLOAD\")) | not)) elif (.extraDataArr | type) == \"array\" then .extraDataArr |= map(select(((.key // \"\") | (startswith(\"SplashAd\") or startswith(\"Ad.PRELOAD\") or startswith(\"Ad.SPLASH\") or startswith(\"Ad.ADLOAD\")) | not))) else . end) | del(.data[]? | select(.entityId == 944 or .entityId == 945 or .entityId == 24455 or .entityId == 36839 or .entityId == 1635 or .title == \"关注\")) | .data |= map(if .entities then .entities |= map(select(.entityId != 1635 and .entityId != 2261 and .entityId != 1633 and .entityId != 413 and .entityId != 417 and .entityId != 1754 and .entityId != 1966 and .entityId != 2274 and .entityId != 1170 and .entityId != 1175 and .entityId != 1190 and .entityId != 2258 and .title != \"关注\")) else . end) end"
   - response_jq:
       match: "^https://api\\.coolapk\\.com/v6/main/indexV8"
       filter: "if (.data | type) != \"array\" then . else .data |= map(select((.entityId != 32557 and .entityId != 29349 and .entityId != 28621) and (.entityTemplate != \"sponsorCard\") and (((.title // \"\") | test(\"值得买|红包\")) | not))) end"
