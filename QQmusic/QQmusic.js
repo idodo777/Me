@@ -6,9 +6,21 @@
 // Egern 适配 (2026-11-12): 上游 Surge/Stash 配置靠 cron 的 timeout=1200 兜底单次运行，Egern 的 schedule 脚本不认 timeout 字段，
 //   网络一慢整次运行会被 Egern 以"脚本执行超时"掐掉。桥接层给未指定 timeout 的请求默认 8 秒超时（ctx.http 的 timeout 单位是毫秒），
 //   单个慢请求失败后脚本正常收尾、下一分钟的 cron 再重试，不再整次被掐。
+// Egern 开关 (2026-11-20): 模块 env_schema 的 LVZ/COIN/DAILY/ACTIVITY/FAVORITE 五个开关在桥接区同步写进
+//   ctx.storage（键 qqmusic_task_lvz/coin/daily/activity/favorite），上游 taskOff(key) 原样读 storage 生效；
+//   LVZ/COIN/DAILY 关时 checkin() 跳过对应签到函数（refreshKey 照常跑，供其他签到用），ACTIVITY/FAVORITE 沿用上游原有门控。
 export default async function (ctx) {
   // 抓取开关（模块参数 GETCK）：关闭时请求脚本直接放行，不抓取、不通知；定时任务不受影响
   if (ctx.request && ctx.env && ctx.env.GETCK === "false") return {};
+  // 任务开关同步（模块参数 → storage）：只写有明确 true/false 的值，未设置时不动 storage（默认开）；
+  //   上游 taskOff(key) 读 storage 判定，ACTIVITY/FAVORITE 沿用上游原有键名
+  if (ctx.env) {
+    const __taskSwitches = { LVZ: "qqmusic_task_lvz", COIN: "qqmusic_task_coin", DAILY: "qqmusic_task_daily", ACTIVITY: "qqmusic_task_activity", FAVORITE: "qqmusic_task_favorite" };
+    for (const [__envKey, __storeKey] of Object.entries(__taskSwitches)) {
+      const __v = ctx.env[__envKey];
+      if (__v === "true" || __v === "false") { try { ctx.storage.set(__storeKey, __v); } catch (e) {} }
+    }
+  }
   // ---------- 环境桥 ----------
   let __request;
   if (ctx.request) {
@@ -155,8 +167,12 @@ async function checkin() {
     const uin = String(snap.uin).replace(/^0+/, "") || String(snap.uin);
     const now = new Date();
     const runState = getRunState(now);
+    const lvzEnabled = !taskOff("qqmusic_task_lvz");
+    const coinEnabled = !taskOff("qqmusic_task_coin");
+    const dailyEnabled = !taskOff("qqmusic_task_daily");
     const activityEnabled = !taskOff("qqmusic_task_activity");
-    const dailyPending = !runState.dailyAttempted && isDailyFlowDue(now);
+    // 每日流程有任一分项开才 pending：全关时不发请求、不写 runState
+    const dailyPending = !runState.dailyAttempted && isDailyFlowDue(now) && (lvzEnabled || coinEnabled || dailyEnabled || activityEnabled);
     const timedSources = activityEnabled && isTimerWindow(now) ? getDueTimedSources(runState, now) : [];
     const timerPending = timedSources.length > 0;
     const redPacketSlot = getRedPacketSlot(now);
@@ -172,9 +188,9 @@ async function checkin() {
         runState.dailyAttempted = true;
         saveRunState(runState);
         await refreshKey(snap, uin);
-        await checkLvzScore(snap, uin);
-        await checkCoinSignIn(snap, uin);
-        await claimDailyTaskRewards(snap, uin);
+        if (lvzEnabled) await checkLvzScore(snap, uin);
+        if (coinEnabled) await checkCoinSignIn(snap, uin);
+        if (dailyEnabled) await claimDailyTaskRewards(snap, uin);
         if (activityEnabled) {
             await checkLotterySignIn(snap, uin);
             await drawCoinLottery(snap, uin);
