@@ -1,5 +1,5 @@
 name: 京东去广告
-description: 京东去广告 0.3
+description: 京东去广告 0.4
 author: FFDNS · zbsdsb · huangkouping
 homepage: https://github.com/idodo777/Me/tree/main/JD
 rules:
@@ -24,18 +24,40 @@ rules:
 - domain:
     match: janapi.jd.com
     policy: REJECT
+- and:
+    match:
+    - domain:
+        match: api.m.jd.com
+    - protocol:
+        match: quic
+    policy: REJECT
+- and:
+    match:
+    - domain:
+        match: api.m.jd.hk
+    - protocol:
+        match: quic
+    policy: REJECT
 map_locals:
   - match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=queryMaterialAdverts(?:&|$)"
     status_code: 200
+    headers:
+      Content-Type: application/json
     body: '{}'
   - match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=(?:cartCouponRecommendGoods|intelligentRecommendSku|obtainGrowingInfo|recommendShop|searchBoxWord|stationPullService|uniformRecommend[0-9a-z]*)(?:&|$)"
     status_code: 200
+    headers:
+      Content-Type: application/json
     body: '{}'
   - match: "^https?://api\\.m\\.jd\\.com/\\?loginType=11(?:&|$)"
     status_code: 200
+    headers:
+      Content-Type: application/json
     body: '{}'
   - match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=getWidgetV1052(?:&|$)"
     status_code: 200
+    headers:
+      Content-Type: application/json
     body: '{}'
   - match: "^https?://m\\.360buyimg\\.com/mobilecms/s1125x2436_jfs"
     status_code: 200
