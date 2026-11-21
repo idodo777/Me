@@ -1,5 +1,5 @@
 name: 京东去广告
-description: 京东去广告 0.2
+description: 京东去广告 0.3
 author: FFDNS · zbsdsb · huangkouping
 homepage: https://github.com/idodo777/Me/tree/main/JD
 rules:
@@ -28,7 +28,7 @@ map_locals:
   - match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=queryMaterialAdverts(?:&|$)"
     status_code: 200
     body: '{}'
-  - match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=(?:cartCouponRecommendGoods|intelligentRecommendSku|obtainGrowingInfo|recommendShop|searchBoxWord|stationPullService|uniformRecommend)(?:&|$)"
+  - match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=(?:cartCouponRecommendGoods|intelligentRecommendSku|obtainGrowingInfo|recommendShop|searchBoxWord|stationPullService|uniformRecommend[0-9a-z]*)(?:&|$)"
     status_code: 200
     body: '{}'
   - match: "^https?://api\\.m\\.jd\\.com/\\?loginType=11(?:&|$)"
