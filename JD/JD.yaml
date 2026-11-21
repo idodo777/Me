@@ -1,5 +1,5 @@
 name: 京东去广告
-description: 京东去广告 0.5
+description: 京东去广告 0.6
 author: FFDNS · zbsdsb · huangkouping
 homepage: https://github.com/idodo777/Me/tree/main/JD
 rules:
@@ -86,6 +86,11 @@ body_rewrites:
       match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=cornerCarousel(?:&|$)"
       filter: "del(.data.cornerInfoList)"
 scriptings:
+- http_request:
+    name: 京东推荐拦截
+    match: '^https?://api\.m\.jd\.com/client\.action\?functionId=(?:cartCouponRecommendGoods|intelligentRecommendSku|obtainGrowingInfo|recommendShop|searchBoxWord|stationPullService|uniformRecommend[0-9a-z]*|queryMaterialAdverts|getWidgetV1052)(?:&|$)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/JD/jd-block.js?v=1
+    timeout: 10
 - http_response:
     name: 京东楼层清洗
     match: '^https?://api\.m\.jd\.(com|hk)/client\.action\?(?:[^&]+&)*functionId=(?:welcomeHome|homePage|myOrderInfo|myDeliveryInfo|personinfoBusiness|getPersonalHome)(?:&|$)'
