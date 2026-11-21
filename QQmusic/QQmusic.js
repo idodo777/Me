@@ -6,17 +6,20 @@
 // Egern 适配 (2026-11-12): 上游 Surge/Stash 配置靠 cron 的 timeout=1200 兜底单次运行，Egern 的 schedule 脚本不认 timeout 字段，
 //   网络一慢整次运行会被 Egern 以"脚本执行超时"掐掉。桥接层给未指定 timeout 的请求默认 8 秒超时（ctx.http 的 timeout 单位是毫秒），
 //   单个慢请求失败后脚本正常收尾、下一分钟的 cron 再重试，不再整次被掐。
-// Egern 开关 (2026-11-20): 模块 env_schema 的 LVZ/COIN/DAILY/FAVORITE 四个开关在桥接区同步写进
-//   ctx.storage（键 qqmusic_task_lvz/coin/daily/favorite），上游 taskOff(key) 原样读 storage 生效；
-//   LVZ/COIN/DAILY 关时 checkin() 跳过对应签到函数（refreshKey 照常跑，供其他签到用），FAVORITE 沿用上游原有门控。
+// Egern 开关 (2026-11-20): 模块 env_schema 的 LVZ/COIN 两个开关在桥接区同步写进
+//   ctx.storage（键 qqmusic_task_lvz/coin），上游 taskOff(key) 原样读 storage 生效；
+//   LVZ/COIN 关时 checkin() 跳过对应签到函数（refreshKey 照常跑，供其他签到用）。
+// v9 (2026-11-21): DAILY/FAVORITE 开关已删（用户：不相关的开关也删）。DAILY 关的是每日任务领奖、
+//   FAVORITE 关的是收藏任务里的收藏子项，两项用户都不用且已关；删开关的同时把每日流程里的领奖入口、
+//   桥接、taskOff 映射、诊断一并去掉，模块只剩抓 Cookie + 绿钻/金币签到。v6 的诊断代码也在 v9 一并移除
+//   （定位已完成，不再每天发诊断通知）。每日任务领奖/收藏任务的函数体仍留在文件里但已无任何入口调用，
+//   与 LVZ/COIN 签到共用一批请求工具，整段删有断签到的风险，按「拿不准的留着」先留着；以后想恢复，
+//   加回开关 + dailyEnabled 门控即可。
 // v8 (2026-11-21): ACTIVITY 开关已删。v7 删了「定时金币」「红包雨」两条 schedule 却留着 ACTIVITY 开关，
 //   开关成了摆设（用户指出）；v8 把开关、桥接、taskOff 映射、每日流程里的活动任务、诊断里的 ACT 项一并删干净，
 //   活动任务永久关闭。以后想恢复活动任务，须同时加回开关 + 两条 schedule + 下面 activityEnabled 的门控。
 // Egern 开关修复 (2026-11-21 v5): v4 只靠桥接区写 storage，Egern 若传布尔值则桥接不写、开关失效（关了也继续跑，
 //   定时金币每分钟超时刷屏即因此）；v5 起 taskOff() 优先直读 ctx.env（字符串/布尔都认），桥接区也归一化布尔再写 storage。
-// v6 诊断 (2026-11-21): 用户已更新 v5 且已保存开关，但定时金币仍每 2 分钟超时。加诊断：每次 checkin() 记录
-//   实际读到的 ctx.env / storage / taskOff 判定 / pending 标志，每天只发一次通知，定位是脚本未更新、ctx.env 未传、
-//   还是 storage 未写。诊断本身不改任何开关逻辑。
 export default async function (ctx) {
   // 抓取开关（模块参数 GETCK）：关闭时请求脚本直接放行，不抓取、不通知；定时任务不受影响
   if (ctx.request && ctx.env && ctx.env.GETCK === "false") return {};
@@ -24,8 +27,9 @@ export default async function (ctx) {
   //   上游 taskOff(key) 读 storage 判定，FAVORITE 沿用上游原有键名
   //   v5: Egern 可能传字符串 "true"/"false"，也可能传布尔 true/false；统一归一化成字符串再写 storage
   //   v8: ACTIVITY 开关已删，桥接不再同步它
+  //   v9: DAILY/FAVORITE 开关已删，桥接只剩 LVZ/COIN
   if (ctx.env) {
-    const __taskSwitches = { LVZ: "qqmusic_task_lvz", COIN: "qqmusic_task_coin", DAILY: "qqmusic_task_daily", FAVORITE: "qqmusic_task_favorite" };
+    const __taskSwitches = { LVZ: "qqmusic_task_lvz", COIN: "qqmusic_task_coin" };
     for (const [__envKey, __storeKey] of Object.entries(__taskSwitches)) {
       const __v = ctx.env[__envKey];
       const __s = (__v === "true" || __v === true) ? "true" : (__v === "false" || __v === false) ? "false" : null;
@@ -180,36 +184,13 @@ async function checkin() {
     const runState = getRunState(now);
     const lvzEnabled = !taskOff("qqmusic_task_lvz");
     const coinEnabled = !taskOff("qqmusic_task_coin");
-    const dailyEnabled = !taskOff("qqmusic_task_daily");
     const activityEnabled = false; // v8: ACTIVITY 开关已删，活动任务永久关闭（定时金币/红包雨 schedule 已在 v7 删）
-    // 每日流程有任一分项开才 pending：全关时不发请求、不写 runState
-    const dailyPending = !runState.dailyAttempted && isDailyFlowDue(now) && (lvzEnabled || coinEnabled || dailyEnabled);
+    // 每日流程有任一分项开才 pending：全关时不发请求、不写 runState（v9: 只剩 LVZ/COIN 两项）
+    const dailyPending = !runState.dailyAttempted && isDailyFlowDue(now) && (lvzEnabled || coinEnabled);
     const timedSources = activityEnabled && isTimerWindow(now) ? getDueTimedSources(runState, now) : [];
     const timerPending = timedSources.length > 0;
     const redPacketSlot = getRedPacketSlot(now);
     const redPacketPending = activityEnabled && redPacketSlot && !runState.redPacketSlots.includes(redPacketSlot);
-
-    // v6 诊断：记录本次运行实际读到的开关值，每天只发一次通知（其余运行只写日志）
-    try {
-        const __dk = ["LVZ", "COIN", "DAILY", "FAVORITE"];
-        const __envPart = __dk.map(k => {
-            const __v = (typeof ctx !== "undefined" && ctx && ctx.env) ? ctx.env[k] : undefined;
-            return k + "=" + (__v === undefined ? "未传" : String(__v) + "(" + typeof __v + ")");
-        }).join(" ");
-        const __stoPart = __dk.map(k => {
-            const __sv = $.getdata("qqmusic_task_" + k.toLowerCase());
-            return k + "=" + (__sv == null ? "无" : String(__sv));
-        }).join(" ");
-        const __offPart = "LVZ=" + taskOff("qqmusic_task_lvz") + " COIN=" + taskOff("qqmusic_task_coin") + " DAILY=" + taskOff("qqmusic_task_daily") + " FAV=" + taskOff("qqmusic_task_favorite");
-        const __pendPart = "每日=" + dailyPending + " 定时=" + timerPending + " 红包=" + redPacketPending;
-        const __diag = ["QQ音乐诊断 v6", "env: " + __envPart, "存: " + __stoPart, "关: " + __offPart, "待: " + __pendPart].join("\n");
-        $.log(__diag);
-        const __today = localDayKey(now);
-        if ($.getdata("qqmusic_diag_v6_date") !== __today) {
-            $.setdata(__today, "qqmusic_diag_v6_date");
-            $.messages.push(__diag);
-        }
-    } catch (e) { $.log("诊断失败: " + (e && e.message ? e.message : String(e))); }
 
     if (!dailyPending && !timerPending && !redPacketPending) {
         $.log("[INFO] 当前批次已处理或无对应任务,跳过网络请求");
@@ -223,7 +204,6 @@ async function checkin() {
         await refreshKey(snap, uin);
         if (lvzEnabled) await checkLvzScore(snap, uin);
         if (coinEnabled) await checkCoinSignIn(snap, uin);
-        if (dailyEnabled) await claimDailyTaskRewards(snap, uin);
         if (activityEnabled) {
             await checkLotterySignIn(snap, uin);
             await drawCoinLottery(snap, uin);
@@ -604,7 +584,7 @@ async function claimDailyTaskRewards(snap, uin) {
             }
         }
 
-        if (!taskOff("qqmusic_task_favorite")) {
+        if (false /* v9: FAVORITE 开关已删，收藏任务不跑 */) {
             const favoriteSongTask = findDailyTask(tasks, (task) => task.ID === "Z1mKlEI" || task.TaskActTypID === "2tuNRp" || Number(task.Type) === 8);
             if (favoriteSongTask && favoriteSongTask.State === 1) {
                 const song = await addTemporarySongFavorite(snap, uin);
@@ -1452,7 +1432,7 @@ function taskOff(key) {
     // Egern 开关优先：模块 env_schema 的值（字符串 "true"/"false" 或布尔 true/false）直接判定，不经过 storage 中转；
     //   读不到 env 时回落到 storage（上游 BoxJS 兼容）。v5 修复：v4 只靠桥接区写 storage，
     //   Egern 若传布尔值则桥接不写、开关失效，关了也继续跑。
-    const __envMap = { qqmusic_task_lvz: "LVZ", qqmusic_task_coin: "COIN", qqmusic_task_daily: "DAILY", qqmusic_task_favorite: "FAVORITE" };
+    const __envMap = { qqmusic_task_lvz: "LVZ", qqmusic_task_coin: "COIN" };
     const __envKey = __envMap[key];
     if (__envKey && typeof ctx !== "undefined" && ctx.env) {
         const __v = ctx.env[__envKey];
