@@ -57,20 +57,20 @@ scriptings:
 - http_request:
     name: QQ音乐 Cookie
     match: '^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=5
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=6
     body_required: true
 - schedule:
     name: QQ音乐每日任务
     cron: "30 7 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=5
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=6
 - schedule:
     name: QQ音乐定时金币
     cron: "* 9-10 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=5
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=6
 - schedule:
     name: QQ音乐红包雨
     cron: "5 0,8,12,16,20,22 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=5
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=6
 mitm:
   hostnames:
     - u6.y.qq.com

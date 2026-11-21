@@ -11,6 +11,9 @@
 //   LVZ/COIN/DAILY 关时 checkin() 跳过对应签到函数（refreshKey 照常跑，供其他签到用），ACTIVITY/FAVORITE 沿用上游原有门控。
 // Egern 开关修复 (2026-11-21 v5): v4 只靠桥接区写 storage，Egern 若传布尔值则桥接不写、开关失效（关了也继续跑，
 //   定时金币每分钟超时刷屏即因此）；v5 起 taskOff() 优先直读 ctx.env（字符串/布尔都认），桥接区也归一化布尔再写 storage。
+// v6 诊断 (2026-11-21): 用户已更新 v5 且已保存开关，但定时金币仍每 2 分钟超时。加诊断：每次 checkin() 记录
+//   实际读到的 ctx.env / storage / taskOff 判定 / pending 标志，每天只发一次通知，定位是脚本未更新、ctx.env 未传、
+//   还是 storage 未写。诊断本身不改任何开关逻辑。
 export default async function (ctx) {
   // 抓取开关（模块参数 GETCK）：关闭时请求脚本直接放行，不抓取、不通知；定时任务不受影响
   if (ctx.request && ctx.env && ctx.env.GETCK === "false") return {};
@@ -181,6 +184,28 @@ async function checkin() {
     const timerPending = timedSources.length > 0;
     const redPacketSlot = getRedPacketSlot(now);
     const redPacketPending = activityEnabled && redPacketSlot && !runState.redPacketSlots.includes(redPacketSlot);
+
+    // v6 诊断：记录本次运行实际读到的开关值，每天只发一次通知（其余运行只写日志）
+    try {
+        const __dk = ["LVZ", "COIN", "DAILY", "ACTIVITY", "FAVORITE"];
+        const __envPart = __dk.map(k => {
+            const __v = (typeof ctx !== "undefined" && ctx && ctx.env) ? ctx.env[k] : undefined;
+            return k + "=" + (__v === undefined ? "未传" : String(__v) + "(" + typeof __v + ")");
+        }).join(" ");
+        const __stoPart = __dk.map(k => {
+            const __sv = $.getdata("qqmusic_task_" + k.toLowerCase());
+            return k + "=" + (__sv == null ? "无" : String(__sv));
+        }).join(" ");
+        const __offPart = "LVZ=" + taskOff("qqmusic_task_lvz") + " COIN=" + taskOff("qqmusic_task_coin") + " DAILY=" + taskOff("qqmusic_task_daily") + " ACT=" + taskOff("qqmusic_task_activity") + " FAV=" + taskOff("qqmusic_task_favorite");
+        const __pendPart = "每日=" + dailyPending + " 定时=" + timerPending + " 红包=" + redPacketPending;
+        const __diag = ["QQ音乐诊断 v6", "env: " + __envPart, "存: " + __stoPart, "关: " + __offPart, "待: " + __pendPart].join("\n");
+        $.log(__diag);
+        const __today = localDayKey(now);
+        if ($.getdata("qqmusic_diag_v6_date") !== __today) {
+            $.setdata(__today, "qqmusic_diag_v6_date");
+            $.messages.push(__diag);
+        }
+    } catch (e) { $.log("诊断失败: " + (e && e.message ? e.message : String(e))); }
 
     if (!dailyPending && !timerPending && !redPacketPending) {
         $.log("[INFO] 当前批次已处理或无对应任务,跳过网络请求");
