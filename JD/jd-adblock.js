@@ -1,22 +1,11 @@
-/* 京东去广告 · 楼层清洗脚本（Egern）
+/* 京东去广告 · 楼层清洗脚本（Egern ctx 版）
  * 合并自 huangkouping/egern 的 jd-adblock（原作 zbsdsb，基于 RuCu6/Maasea 原插件逻辑），
  * 适配京东 15.9.50+ 新协议：解码响应（明文 / base64）→ 按内容特征识别接口 →
  * 清洗开屏、首页推广楼层、我的 / 订单 / 物流页广告楼层与弹窗 → 按原格式回写；
  * 无可清内容时原样放行。异常一律透传，绝不拦正常响应。
  * Source: https://raw.githubusercontent.com/zbsdsb/loon-adblock-plugins/main/JD_remove_ads_v2.js
+ * 注意：京东响应须用 ctx.response.text() + JSON.parse，ctx.response.json() 会抛错。
  */
-(function (complete) {
-let finished = false;
-const $done = value => { if (!finished) { finished = true; complete(value); } };
-try {
-if (typeof $response === "undefined" || typeof $response.body !== "string") return $done({});
-
-const url = $request.url;
-const body = $response.body;
-if (!body || typeof body !== 'string') return $done({});
-
-// 仅处理京东主 API（防误用）
-if (!/^https?:\/\/api\.m\.jd\.(com|hk)\/client\.action/.test(url)) return $done({});
 
 // ---------- 纯 JS base64 / UTF-8 工具（不依赖 atob/btoa/TextDecoder） ----------
 const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -192,37 +181,46 @@ function cleanPayload(p) {
   return changed;
 }
 
-// ---------- 主流程 ----------
-// 大响应直接放行（如 basicConfig 800KB，无广告清洗点）
-if (body.length > 2000000) return $done({});
+export default async function (ctx) {
+  try {
+    const url = ctx.request.url;
+    // 仅处理京东主 API（防误用）
+    if (!/^https?:\/\/api\.m\.jd\.(com|hk)\/client\.action/.test(url)) return;
 
-let obj = null;
-let isB64 = false;
+    const body = await ctx.response.text();
+    if (!body || typeof body !== 'string') return;
 
-// 1) 明文 JSON（老协议 / 非 base64 响应）
-try {
-  obj = JSON.parse(body);
-} catch (e) {
-  // 2) base64 JSON（京东 15.9.50+ 新协议）
-  if (/^[A-Za-z0-9+/=]+$/.test(body) && body.length % 4 === 0) {
+    // 大响应直接放行（如 basicConfig 800KB，无广告清洗点）
+    if (body.length > 2000000) return;
+
+    let obj = null;
+    let isB64 = false;
+
+    // 1) 明文 JSON（老协议 / 非 base64 响应）
     try {
-      obj = JSON.parse(bytesToUtf8(b64DecodeBytes(body)));
-      isB64 = true;
-    } catch (e2) { obj = null; }
+      obj = JSON.parse(body);
+    } catch (e) {
+      // 2) base64 JSON（京东 15.9.50+ 新协议）
+      if (/^[A-Za-z0-9+/=]+$/.test(body) && body.length % 4 === 0) {
+        try {
+          obj = JSON.parse(bytesToUtf8(b64DecodeBytes(body)));
+          isB64 = true;
+        } catch (e2) { obj = null; }
+      }
+    }
+
+    if (!obj || typeof obj !== 'object') return;
+
+    // 解包装：{"code":..,"data":{..}} → 清洗 data 层；其它结构 → 直接清洗
+    let target = obj;
+    if (!Array.isArray(obj) && obj.data && typeof obj.data === 'object') {
+      target = obj.data;
+    }
+
+    const changed = cleanPayload(target);
+    if (!changed) return;
+    return { body: isB64 ? b64EncodeStr(JSON.stringify(obj)) : JSON.stringify(obj) };
+  } catch (_) {
+    return;
   }
 }
-
-if (!obj || typeof obj !== 'object') return $done({});
-
-// 解包装：{"code":..,"data":{..}} → 清洗 data 层；其它结构 → 直接清洗
-let target = obj;
-if (!Array.isArray(obj) && obj.data && typeof obj.data === 'object') {
-  target = obj.data;
-}
-
-const changed = cleanPayload(target);
-if (!changed) return $done({});
-return $done({ body: isB64 ? b64EncodeStr(JSON.stringify(obj)) : JSON.stringify(obj) });
-
-} catch (_) { $done({}); }
-})($done);
