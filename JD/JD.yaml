@@ -52,11 +52,17 @@ body_rewrites:
       match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=lite_advertising"
       find: "jdLiteAdvertisingVO"
       replace: "sooyaaabo"
+  - response_jq:
+      match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=queryMessagesV1326"
+      filter: "del(.topTabList)"
+  - response_jq:
+      match: "^https?://api\\.m\\.jd\\.com/client\\.action\\?functionId=cornerCarousel"
+      filter: "del(.data.cornerInfoList)"
 scriptings:
 - http_response:
     name: 京东楼层清洗
-    match: '^https?://api\.m\.jd\.(com|hk)/client\.action\?(?:[^&]+&)*functionId=(?:welcomeHome|homePage|myOrderInfo|myDeliveryInfo|personInfoBusiness|getPersonalHome)(?:&|$)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/JD/jd-adblock.js?v=1
+    match: '^https?://api\.m\.jd\.(com|hk)/client\.action\?(?:[^&]+&)*functionId=(?:welcomeHome|homePage|myOrderInfo|myDeliveryInfo|personinfoBusiness|getPersonalHome)(?:&|$)'
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/JD/jd-adblock.js?v=2
     body_required: true
     timeout: 10
 mitm:

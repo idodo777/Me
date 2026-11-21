@@ -86,7 +86,9 @@ const HOMEFLOOR_DEL = [
   'ruleFloat',   // 资质与规则
   'searchIcon',  // 右上角消费券
   'topRotate',   // 左上角 logo
-  'tabBarAtmosphere' // 底部悬浮通栏推广
+  'tabBarAtmosphere', // 底部悬浮通栏推广
+  'topTab',      // 首页顶部类目 tab 行（关注/推荐/国家补贴/手机/医药健康…）
+  'dynamicIcon'  // 首页图标行（秒杀/看病买药/爱回收/京东服务/京喜自营/领券…）
 ];
 
 // 我的页 iconToolFloor 保留入口（排序用）
@@ -137,6 +139,10 @@ function cleanFloors(p) {
     } else if (f.mId === 'userinfo' && d && typeof d === 'object') {
       // 我的页：开通 plus 会员卡片
       if (d.newPlusBlackCard !== undefined) { delete d.newPlusBlackCard; changed = true; }
+    } else if (f.mId === 'marketTNFloorNew' && f.refId === 'conciseUserInfoFloorTN' && d && typeof d === 'object' && d.tnData && typeof d.tnData === 'object' && d.tnData.newsInfo && Array.isArray(d.tnData.newsInfo.newsInfoList) && d.tnData.newsInfo.newsInfoList.length) {
+      // 我的页：顶部点评快讯横条（newsInfoList 整列清，不按文案匹配，因条目轮换）
+      d.tnData.newsInfo.newsInfoList = [];
+      changed = true;
     }
   }
   return changed;
@@ -160,6 +166,15 @@ function cleanPayload(p) {
   if (Array.isArray(p.webViewFloorList) && p.webViewFloorList.length) {
     p.webViewFloorList = [];
     changed = true;
+  }
+
+  // 首页：国家补贴×超级补贴卡（promotionTabs 整卡删）
+  if (p.promotionTabs !== undefined) { delete p.promotionTabs; changed = true; }
+  // 首页：品质生活卡（hybrid 楼层 floorId=12538 定向删；hybrid 另有 12423/13034/12629/12425，不可整类删）
+  if (Array.isArray(p.floorList) && p.floorList.length) {
+    const beforeFl = p.floorList.length;
+    p.floorList = p.floorList.filter(i => !(i && i.floorId === 12538));
+    if (p.floorList.length !== beforeFl) changed = true;
   }
 
   // 物流页 deliverLayer / orderTrackBusiness
