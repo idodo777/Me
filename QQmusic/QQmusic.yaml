@@ -37,13 +37,6 @@ env_schema:
     options:
     - "true"
     - "false"
-  ACTIVITY:
-    name: "活动任务"
-    description: "金币抽奖签到、红包雨、浮动宝箱及活动任务"
-    default_value: "true"
-    options:
-    - "true"
-    - "false"
   FAVORITE:
     name: "收藏任务"
     description: "临时收藏歌曲、歌单、有声书并关注歌手"
@@ -53,20 +46,19 @@ env_schema:
     - "false"
 # 注: Egern 的 schedule 脚本只认 name/cron/script_url,不认 timeout 字段(上游 Surge/Stash 的 timeout=1200 在此无效);
 # 单请求时限改由脚本桥接层默认 8 秒兜底,见 QQmusic.js 头注。cron 表达式与上游一字不差(2026-11-12 已校对)。
-# 2026-11-21 v7: 「定时金币」与「红包雨」两条 schedule 已删——ACTIVITY 开关已关,这两条本就不该跑,
-# 但 Egern 仍每分钟拉起脚本且偶发执行超时刷屏,脚本内早退拦不住(疑 Egern 定时任务读 env/storage 不稳定,
-# 10:55 诊断读对了、10:59 同一条又超时)。删 schedule 是唯一能彻底止住刷屏的办法;每日 07:30 保留(LVZ/COIN 还开着)。
-# 若以后把 ACTIVITY 重新打开,找聪明豆把这两条加回来即可。
+# 2026-11-21 v8: ACTIVITY 开关已删。v7 删了「定时金币」「红包雨」两条 schedule 却留着 ACTIVITY 开关，
+# 开关成了摆设（用户指出）；v8 开关、桥接、taskOff 映射、每日流程里的活动任务一并删干净，活动任务永久关闭。
+# 每日 07:30 保留（LVZ/COIN 还开着）。若以后想恢复活动任务，须同时加回开关 + 两条 schedule + JS 里的门控。
 scriptings:
 - http_request:
     name: QQ音乐 Cookie
     match: '^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=6
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=8
     body_required: true
 - schedule:
     name: QQ音乐每日任务
     cron: "30 7 * * *"
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=6
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic.js?v=8
 mitm:
   hostnames:
     - u6.y.qq.com
