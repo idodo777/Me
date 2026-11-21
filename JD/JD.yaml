@@ -1,5 +1,5 @@
 name: 京东去广告
-description: 京东去广告 0.4
+description: 京东去广告 0.5
 author: FFDNS · zbsdsb · huangkouping
 homepage: https://github.com/idodo777/Me/tree/main/JD
 rules:
@@ -89,7 +89,7 @@ scriptings:
 - http_response:
     name: 京东楼层清洗
     match: '^https?://api\.m\.jd\.(com|hk)/client\.action\?(?:[^&]+&)*functionId=(?:welcomeHome|homePage|myOrderInfo|myDeliveryInfo|personinfoBusiness|getPersonalHome)(?:&|$)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/JD/jd-adblock.js?v=3
+    script_url: https://raw.githubusercontent.com/idodo777/Me/main/JD/jd-adblock.js?v=4
     body_required: true
     timeout: 10
 mitm:
