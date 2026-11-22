@@ -2,7 +2,6 @@
 # 直连规则合集：在主配置里以 rule_set 引用并绑定 policy: DIRECT
 no_resolve: true
 domain_suffix_set:
-  - eplayerx.com
   - mobaiemby.site
   - reflix.top
 ip_cidr_set:
