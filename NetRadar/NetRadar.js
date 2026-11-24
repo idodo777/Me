@@ -3,7 +3,7 @@
 // 拦截数量：0
 // 脚本数量：1
 // 上游来源：https://raw.githubusercontent.com/jnlaoshu/MySelf/master/Egern/Widget/NetRadar.js
-// 本地修改（2026-11-24）：只保留大号布局，删除中号/小号相关代码；深色/浅色双模式保留；本地延迟与节点延迟改为各测 3 次取中位数；地名繁体转简体；解锁地区按节点实际国家显示（上游写死 HK/SG/US）
+// 本地修改（2026-11-24）：只保留大号布局，删除中号/小号相关代码；深色/浅色双模式保留；本地延迟与节点延迟改为各测 3 次取中位数；地名繁体转简体；解锁地区按节点实际国家显示（上游写死 HK/SG/US）；节点查 IP 从 ip-api 换成 ipinfo.io，失败回落 ip-api
 
 function clean(value) {
   return String(
@@ -162,6 +162,34 @@ export default async function (ctx) {
     };
   };
 
+  // 节点查 IP：ipinfo.io 为主（口碑大、字段全），拿不到 IP 时回落 ip-api
+  const getNodeInfo = async () => {
+    const info = await httpGetMedian('https://ipinfo.io/json');
+    const data = info.data || {};
+
+    if (data.ip) {
+      const org = clean(data.org);
+      const asn = org.split(' ')[0] || "";
+      const isp = org.replace(/^AS\d+\s*/, "") || org;
+
+      return {
+        data: {
+          query: data.ip,
+          countryCode: data.country,
+          country: data.country,
+          city: data.city,
+          regionName: data.region,
+          isp: isp,
+          org: org,
+          as: asn
+        },
+        ping: info.ping
+      };
+    }
+
+    return httpGetMedian(`http://ip-api.com/json/?lang=zh-CN&_t=${Date.now()}`);
+  };
+
   async function timed(fn, timeoutMs = TIMEOUT_MS) {
     const start = Date.now();
     try {
@@ -208,7 +236,7 @@ export default async function (ctx) {
     youtube, netflix, disney, spotify, chatgpt, claude, gemini, grok
   ] = await Promise.all([
     httpGetMedian('https://myip.ipip.net/json'),
-    httpGetMedian(`http://ip-api.com/json/?lang=zh-CN&_t=${Date.now()}`),
+    getNodeInfo(),
     httpGet('https://my.ippure.com/v1/info'),
     httpGet('https://api64.ipify.org?format=json'),
     timed(checkYouTube, TIMEOUT_MS), timed(checkNetflix, TIMEOUT_MS), timed(checkDisney, 4500), timed(checkSpotify, TIMEOUT_MS),
