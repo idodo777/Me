@@ -3,6 +3,7 @@
 #!author=MaYIHEI
 #!homepage=https://github.com/idodo777/Me/tree/main/PCcookie
 #!system=ios
+#!arguments=WEIBOTALK:false,TENVIDEO:false,MIHOYO:false,NEWMIXC:false,MISHOP:false,MILOTTERY:false,YOUPIN:false,LHTJ:false,QQMUSIC:false,WANDA:false,TINGTINGFM:false,WPS:false,CAMSCANNER:false,DREAME:false,LINGHU:false,NODESEEK:false,PAN1:false,BAIDUNETDISK:false,LAIFEN:false,CMCC:false,HEYBOX:false,PPMT:false,TUHU:false,HAIDILAO:false,HUISHENG:false,MINISO:false,BHG:false,LONGDE:false,LHTJMP:false,WEDOME:false,LINLI:false
 
 # 蚂蚁Cookie合集（Surge 版）
 # 原作: MaYIHEI
@@ -15,39 +16,6 @@
 #   上游 31 个原始 .js 虽是 Env 写法、Surge 能跑，但不读任何分应用开关（$argument 只用于 .merge 汇总通知），
 #   .lpx 说明亦写明“没有单独开关，整个插件就是开关”；直引会丢掉 31 个开关，故按试点方法去桥转换。
 # 注意: script-path 目前是占位 URL，待确认 Surge 版 JS 的托管位置后再替换。
-
-[Argument]
-WEIBOTALK = false
-TENVIDEO = false
-MIHOYO = false
-NEWMIXC = false
-MISHOP = false
-MILOTTERY = false
-YOUPIN = false
-LHTJ = false
-QQMUSIC = false
-WANDA = false
-TINGTINGFM = false
-WPS = false
-CAMSCANNER = false
-DREAME = false
-LINGHU = false
-NODESEEK = false
-PAN1 = false
-BAIDUNETDISK = false
-LAIFEN = false
-CMCC = false
-HEYBOX = false
-PPMT = false
-TUHU = false
-HAIDILAO = false
-HUISHENG = false
-MINISO = false
-BHG = false
-LONGDE = false
-LHTJMP = false
-WEDOME = false
-LINLI = false
 
 [MITM]
 hostname = %APPEND% api.weibo.cn, pbaccess.video.qq.com, vip.video.qq.com, api-takumi.miyoushe.com, api-takumi.mihoyo.com, app.mixcapp.com, shop-api.retail.mi.com, m.xiaomiyoupin.com, gw2c-hw-open.longfor.com, u6.y.qq.com, user-api-prd-mx.wandafilm.com, xunting.vbegin.com.cn, personal-act.wps.cn, api-cs.intsig.net, cn-wxmall.dreame.tech, cn-yx-wxmall.dreame.tech, www.nodeseek.com, pan1.me, pan.baidu.com, app-gw.shuye.com, client.app.coc.10086.cn, clientaccess.10086.cn, h5.bj.10086.cn, api.xiaoheihe.cn, popvip.paquapp.com, api.tuhu.cn, superapp-public.kiwa-tech.com, media.meituan.com, member-center.miniso.com, a.china-smartech.com, scrm-b.zjian.net, webapi.qmai.cn

@@ -3,6 +3,7 @@
 #!author=idodo777
 #!homepage=https://github.com/idodo777/Me/tree/main/blockcheck
 #!system=ios
+#!arguments=POLICY:-
 
 # 节点阻断检测（Surge 版，v6.0）
 # 结论：(b) 需改写 —— 上游原版不能直接在 Surge 里用，且功能与本地 v6.0 不一致。
@@ -44,9 +45,6 @@
 #   是否等价于 Egern 的「留空按分流规则（兜底策略）」手册未明说；checkDirect 的 policy:"DIRECT"
 #   能否按名字传未经实测（若被拒，本机网络会被误判异常）；POLICY 若指向外部策略组
 #   （policy-path）成员名，按名字引用不到，须用其 identifier。
-
-[Argument]
-POLICY =
 
 [Script]
 block-check = type=generic, script-path=https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check-surge.js, timeout=30, argument=POLICY={{{POLICY}}}

@@ -3,6 +3,7 @@
 #!author=ChavyLeung · sub-store-org · Script-Hub-Org
 #!homepage=https://github.com/idodo777/Me/tree/main/Base3in1
 #!system=ios
+#!arguments=Notify:开启通知
 
 # 基础依赖 3in1（Surge 版）
 # 原作: ChavyLeung · sub-store-org · Script-Hub-Org
@@ -12,9 +13,6 @@
 # 注意: Egern 里 Notify 另有「关闭通知」「跟随链接」两个可选值，Surge 的 [Argument] 不支持下拉，
 #   只取默认值「开启通知」；如需切换，在 Surge 模块编辑页把 Notify 的值改成对应文字即可。
 # 注意: Sub-Store 两条的 Egern max_size: -1 在 Surge [Script] 里没有对应参数，已略去。
-
-[Argument]
-Notify = 开启通知
 
 [MITM]
 hostname = %APPEND% script.hub, *.script.hub, sub.store, boxjs.com, boxjs.net, *.boxjs.com, *.boxjs.net

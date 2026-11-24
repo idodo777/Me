@@ -4,6 +4,7 @@
 #!homepage=https://github.com/idodo777/Me/tree/main/wsgg
 #!icon=https://is1-ssl.mzstatic.com/image/thumb/Purple116/v4/83/d8/8a/83d88a92-5a4d-7a2f-118c-80d795e7a9f6/AppIcon-0-0-1x_U007emarketing-0-5-0-0-sRGB-85-220.png/144x144.png
 #!system=ios
+#!arguments=SGCC_USERNAME:-,SGCC_PASSWORD:-,SGCC_SMS:-,SGCC_ACCOUNT:-,SGCC_REGION:北京,SGCC_POLICY:DIRECT,SGCC_CHANNEL:auto,SGCC_REFRESH:6
 
 # 网上国网（Hark 液态玻璃版）Surge 版
 # 原作: 自用二改，原作者 @Hantaoz
@@ -31,16 +32,6 @@
 # 注意: SGCC_POLICY 在 Surge 的 $httpClient 里没有按请求指定策略的选项，收下但不生效，
 #   请求走 Surge 默认路由。
 # 注意: widgetFamily 在 Surge 通用脚本里没有对应取值，桥里默认 'systemMedium'（中号布局）。
-
-[Argument]
-SGCC_USERNAME =
-SGCC_PASSWORD =
-SGCC_SMS =
-SGCC_ACCOUNT =
-SGCC_REGION = 北京
-SGCC_POLICY = DIRECT
-SGCC_CHANNEL = auto
-SGCC_REFRESH = 6
 
 [Script]
 wsgg = type=generic, script-path=https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg-surge.js, timeout=90, argument=SGCC_USERNAME={{{SGCC_USERNAME}}}&SGCC_PASSWORD={{{SGCC_PASSWORD}}}&SGCC_SMS={{{SGCC_SMS}}}&SGCC_ACCOUNT={{{SGCC_ACCOUNT}}}&SGCC_REGION={{{SGCC_REGION}}}&SGCC_POLICY={{{SGCC_POLICY}}}&SGCC_CHANNEL={{{SGCC_CHANNEL}}}&SGCC_REFRESH={{{SGCC_REFRESH}}}

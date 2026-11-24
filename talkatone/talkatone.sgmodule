@@ -3,14 +3,12 @@
 #!author=eslco / LOWERTOP
 #!homepage=https://github.com/idodo777/Me/tree/main/talkatone
 #!system=ios
+#!arguments=PROXY_POLICY:PROXY
 
 # Talkatone 分流 + 去广告（Surge 版）
 # 原 Surge 模块: eslco/base Talkatone_Opt.sgmodule（作者 eslco，规则来源 LOWERTOP）
 # 由 Egern 版 talkatone.yaml 转回 Surge 格式，逻辑原样
 # 注意: 仅适用于登录 Talkatone 后使用，不适用于注册
-
-[Argument]
-PROXY_POLICY = PROXY
 
 [Rule]
 DOMAIN-KEYWORD,googleads,REJECT

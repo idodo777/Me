@@ -3,6 +3,7 @@
 #!author=MaYIHEI
 #!homepage=https://github.com/idodo777/Me/tree/main/QQmusic
 #!system=ios
+#!arguments=GETCK:true,LVZ:true,COIN:true
 
 # QQ音乐签到（Surge 版）
 # 原作: MaYIHEI
@@ -27,11 +28,6 @@
 #   ③taskOff() 去掉 Egern ctx.env 分支（Surge 里 ctx 不存在，死代码），只读 storage。
 #   其余与上游逐行 diff 一致（含 Env 类，getEnv 检测 $environment["surge-version"] 走 Surge 原生 API）。
 # 注意: script-path 目前是占位 URL，待确认 Surge 版 JS 的托管位置后再替换。
-
-[Argument]
-GETCK = true
-LVZ = true
-COIN = true
 
 [MITM]
 hostname = %APPEND% u6.y.qq.com
