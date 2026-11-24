@@ -1,18 +1,18 @@
-# 上游作者：lylywayr
+# 上游作者：jnlaoshu
 
-# 上游更新时间：2026.07.09 10:49
+# 上游更新时间：2026.08.17 09:00
 
 # 拦截数量：0
 
 # 脚本数量：1
 
-# 上游来源：https://raw.githubusercontent.com/lylywayr/NetWork-Module/refs/heads/main/Egern/%E7%BD%91%E7%BB%9C%E8%AF%8A%E6%96%AD%E9%9B%B7%E8%BE%BE/%E7%BD%91%E7%BB%9C%E8%AF%8A%E6%96%AD%E9%9B%B7%E8%BE%BE.js
+# 上游来源：https://raw.githubusercontent.com/jnlaoshu/MySelf/master/Egern/Widget/NetRadar.js
 
 name: 网络雷达
 
-description: 显示本机与节点 IP、延迟，以及流媒体与 AI 服务解锁状态 0.3
+description: 显示本机与节点 IP、延迟，以及流媒体与 AI 服务解锁状态 0.4
 
-author: lylywayr
+author: jnlaoshu
 
 icon: network
 
