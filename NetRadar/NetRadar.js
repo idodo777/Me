@@ -10,6 +10,8 @@
  * - XY：手动指定协议，例如 VLESS / Trojan / HY2 / AnyTLS
  * - XY 未设置：继续按原逻辑从 Egern 上下文 / 节点元数据 / 节点名尝试识别
  *
+ * - ABUSEIPDB_KEY：可选。填入 AbuseIPDB 免费 API Key 后，纯净评分额外参考该 IP 的滥用举报记录；不填则不查
+ *
  * 策略优先级：
  * POLICY ＞ LMT / AI ＞ 单服务内置候选策略名匹配 ＞ 不指定 policy
  *
@@ -33,10 +35,12 @@ export default async function (ctx) {
   const MASK_IP = clean(env.YS) === "1";
   const FORCE_PROTOCOL = clean(env.XY);
 
+  const ABUSEIPDB_KEY = clean(env.ABUSEIPDB_KEY);
+
   const TIMEOUT = 4500;
   const POLICY_PROBE_TIMEOUT = 1800;
   const POLICY_PROBE_BATCH_SIZE = 6;
-  const REFRESH_MINUTES = 15;
+  const REFRESH_MINUTES = 5;
   const FORCE_LOCAL_MAINLAND = true;
 
   const servicePolicyCache = {};
@@ -629,6 +633,13 @@ export default async function (ctx) {
       merged = mergeExitSources([merged, proxyCheck]);
     }
 
+    const abuseCheck = await getAbuseIPDB(merged.ip);
+
+    if (abuseCheck) {
+      merged.flags = merged.flags || {};
+      merged.flags.abuseScore = abuseCheck.score;
+    }
+
     return merged;
   }
 
@@ -863,7 +874,8 @@ export default async function (ctx) {
     return {
       ok: measured.ok,
       ms: measured.ms,
-      target: measured.target
+      target: measured.target,
+      loss: measured.loss || 0
     };
   }
 
@@ -876,20 +888,79 @@ export default async function (ctx) {
     return {
       ok: measured.ok,
       ms: measured.ms,
-      target: measured.target
+      target: measured.target,
+      loss: measured.loss || 0
     };
   }
 
+  async function getProxyDownloadSpeed(latencyMs) {
+    const startedAt = Date.now();
+
+    try {
+      const response = await ctx.http.get(
+        "https://speed.cloudflare.com/__down?bytes=1000000&_=" + Date.now(),
+        requestOptions({ timeout: 12000 })
+      );
+
+      await response.text();
+
+      const totalMs = Math.max(1, Date.now() - startedAt);
+      const transferMs = totalMs - 2 * (Number(latencyMs) || 0);
+
+      if (response.status < 200 || response.status >= 400 || transferMs <= 0) {
+        return { ok: false, mbps: 0 };
+      }
+
+      return {
+        ok: true,
+        mbps: Math.round(1000000 * 8 / (transferMs / 1000) / 1000000 * 10) / 10
+      };
+    } catch (_) {
+      return { ok: false, mbps: 0 };
+    }
+  }
+
   async function measureLatencySet(urls, direct) {
-    const results = await Promise.all(
-      urls.map(function (url) {
-        return latencyProbe(url, direct);
+    const perUrl = await Promise.all(
+      urls.map(async function (url) {
+        const tries = await Promise.all([
+          latencyProbe(url, direct),
+          latencyProbe(url, direct),
+          latencyProbe(url, direct)
+        ]);
+
+        const okTimes = tries
+          .filter(function (item) {
+            return item.ok && item.ms > 0;
+          })
+          .map(function (item) {
+            return item.ms;
+          });
+
+        return {
+          url: url,
+          ms: median(okTimes),
+          okCount: okTimes.length,
+          totalCount: tries.length
+        };
       })
     );
 
-    const passed = results
+    let totalCount = 0;
+    let failCount = 0;
+
+    perUrl.forEach(function (item) {
+      totalCount += item.totalCount;
+      failCount += item.totalCount - item.okCount;
+    });
+
+    const loss = totalCount > 0
+      ? Math.round(failCount / totalCount * 100)
+      : 0;
+
+    const passed = perUrl
       .filter(function (item) {
-        return item.ok && item.ms > 0;
+        return item.ms > 0;
       })
       .sort(function (a, b) {
         return a.ms - b.ms;
@@ -899,26 +970,30 @@ export default async function (ctx) {
       return {
         ok: false,
         ms: 0,
-        target: ""
+        target: "",
+        loss: 100
       };
     }
 
-    const best = passed[0];
-
     return {
       ok: true,
-      ms: best.ms,
-      target: best.url
+      ms: passed[0].ms,
+      target: passed[0].url,
+      loss: loss
     };
   }
 
   async function latencyProbe(url, direct) {
     const startedAt = Date.now();
+    const target =
+      url +
+      (url.indexOf("?") >= 0 ? "&" : "?") +
+      "_=" + Date.now() + Math.floor(Math.random() * 100000);
 
     try {
       const response = direct
-        ? await ctx.http.get(url, directRequestOptions())
-        : await ctx.http.get(url, requestOptions());
+        ? await ctx.http.get(target, directRequestOptions())
+        : await ctx.http.get(target, requestOptions());
 
       return {
         ok: response.status >= 200 && response.status < 400,
@@ -955,6 +1030,47 @@ export default async function (ctx) {
     }
 
     return parseProxyCheck(result.data, target);
+  }
+
+  async function getAbuseIPDB(ip) {
+    const key = ABUSEIPDB_KEY;
+    const target = clean(ip);
+
+    if (!key || !target || target === "未识别") {
+      return null;
+    }
+
+    try {
+      const response = await ctx.http.get(
+        "https://api.abuseipdb.com/api/v2/check?ipAddress=" +
+          encodeURIComponent(target) +
+          "&maxAgeInDays=90&verbose=",
+        {
+          timeout: TIMEOUT,
+          redirect: "follow",
+          credentials: "omit",
+          headers: {
+            Key: key,
+            Accept: "application/json",
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)"
+          }
+        }
+      );
+
+      if (response.status < 200 || response.status >= 400) {
+        return null;
+      }
+
+      const data = await response.json();
+      const info = (data && data.data) || {};
+
+      return {
+        score: Number(info.abuseConfidenceScore) || 0,
+        reports: Number(info.totalReports) || 0
+      };
+    } catch (_) {
+      return null;
+    }
   }
 
   async function getQuic() {
@@ -1097,6 +1213,10 @@ export default async function (ctx) {
     ])
   ]);
 
+  const proxyDownload = await getProxyDownloadSpeed(
+    proxyLatency.ok ? proxyLatency.ms : 0
+  );
+
   const carrierByDirectISP = carrierFromISP(
     [
       localExit.isp,
@@ -1116,7 +1236,7 @@ export default async function (ctx) {
 
   const dns = chooseDNSProvider(baseDNS, verifiedDNS);
   const dnsLabel = dnsTinyLabel(dns.short || dns.full);
-  const localArea = localExit.label || "中国大陆";
+  const localArea = normalizePlaceName(localExit.label) || "中国大陆";
   const nat = detectNAT(localIP, exit.ip);
   const purity = purityScore(exit);
   const risk = riskLevel(exit, purity);
@@ -1128,6 +1248,14 @@ export default async function (ctx) {
   const localLatencyColor = localLatency.ok
     ? localLatency.ms <= 220 ? C.green : C.amber
     : C.red;
+
+  const downloadColor = !proxyDownload.ok
+    ? C.red
+    : proxyDownload.mbps >= 10
+      ? C.green
+      : proxyDownload.mbps >= 3
+        ? C.amber
+        : C.red;
 
   const natColor = toneColor(nat.tone, C);
   const quicColor = toneColor(quic.tone, C);
@@ -1265,38 +1393,28 @@ export default async function (ctx) {
     );
   }
 
-  function proxyTagLine(value, tone, fill) {
+  function tagIcon(symbol, value, tone) {
     return row(
       [
-        text(value, 4.7, "semibold", tone, {
+        image(symbol, tone, 7, 7),
+        text(value, 5, "medium", tone, {
           maxLines: 1,
-          minScale: 0.42,
-          textAlign: "center"
+          minScale: 0.6
         })
       ],
       {
-        width: 37,
-        height: 7.2,
-        padding: [0.7, 2.5],
-        backgroundColor: fill,
-        borderRadius: 4.8,
+        gap: 1,
         alignItems: "center"
       }
     );
   }
 
-  function proxyTagRows(tagOne, tagTwo, toneOne, fillOne, toneTwo, fillTwo) {
-    return col(
-      [
-        proxyTagLine(tagOne, toneOne, fillOne),
-        proxyTagLine(tagTwo, toneTwo, fillTwo)
-      ],
-      {
-        width: 39,
-        gap: 1,
-        alignItems: "start"
-      }
-    );
+  function kindIcon(value) {
+    if (value === "住宅 IP" || value === "原生住宅") return "house.fill";
+    if (value === "移动网络" || value === "移动出口") return "antenna.radiowaves.left.and.right";
+    if (value === "商业机房") return "building.2.fill";
+    if (value === "教育网络" || value === "企业网络") return "building.columns.fill";
+    return "globe";
   }
 
   function iconBox(symbol, tone, fill, side) {
@@ -1636,7 +1754,8 @@ export default async function (ctx) {
           glow: uiColor(C.scoreGlow),
           text: uiColor(C.scoreLeft),
           muted: uiColor(C.muted)
-        }
+        },
+        purity.notes || []
       ),
       68,
       52,
@@ -1648,8 +1767,8 @@ export default async function (ctx) {
 
   function proxyCard() {
     const city =
-      clean(exit.city) ||
-      clean(exit.country) ||
+      normalizePlaceName(clean(exit.city)) ||
+      normalizePlaceName(clean(exit.country)) ||
       "未知地区";
 
     const tagOne = exit.kind || "未知网络";
@@ -1671,13 +1790,11 @@ export default async function (ctx) {
         ? C.amber
         : C.green;
 
-    const tagOneFill =
-      exit.kind === "商业机房"
-        ? C.amberSoft
-        : C.greenSoft;
-
     const tagTwoTone = C.green;
-    const tagTwoFill = C.greenSoft;
+
+    const tagTwoIcon = clean(exit.cloudProvider)
+      ? "cloud.fill"
+      : kindIcon(tagTwo);
 
     return card(
       [
@@ -1694,7 +1811,23 @@ export default async function (ctx) {
 
         row(
           [
-            flagBox(),
+            col(
+              [
+                flagBox(),
+
+                row(
+                  [
+                    tagIcon(kindIcon(tagOne), tagOne, tagOneTone),
+                    tagIcon(tagTwoIcon, tagTwo, tagTwoTone)
+                  ],
+                  { gap: 3 }
+                )
+              ],
+              {
+                gap: 2,
+                alignItems: "start"
+              }
+            ),
 
             col(
               [
@@ -1716,14 +1849,10 @@ export default async function (ctx) {
                   minScale: 0.62
                 }),
 
-                proxyTagRows(
-                  tagOne,
-                  tagTwo,
-                  tagOneTone,
-                  tagOneFill,
-                  tagTwoTone,
-                  tagTwoFill
-                )
+                text(exit.ip || "IP 未获取", 7.2, "medium", C.subtext, {
+                  maxLines: 1,
+                  minScale: 0.62
+                })
               ],
               {
                 flex: 1,
@@ -1753,9 +1882,15 @@ export default async function (ctx) {
           [
             metricBox(
               "clock",
-              "延迟",
+              proxyLatency.loss > 0 ? "延迟 丢包" + proxyLatency.loss + "%" : "延迟",
               proxyLatency.ok ? proxyLatency.ms + "ms" : "失败",
-              proxyLatencyColor
+              proxyLatencyColor,
+              proxyLatency.loss > 0
+                ? {
+                    labelSize: 4.25,
+                    labelMinScale: 0.38
+                  }
+                : undefined
             ),
 
             metricBox(
@@ -1781,6 +1916,17 @@ export default async function (ctx) {
               "协议",
               NODE_PROTOCOL,
               C.purple,
+              {
+                valueSize: 5.4,
+                valueMinScale: 0.34
+              }
+            ),
+
+            metricBox(
+              "arrow.down.circle.fill",
+              "下载",
+              proxyDownload.ok ? proxyDownload.mbps + "Mbps" : "—",
+              downloadColor,
               {
                 valueSize: 5.4,
                 valueMinScale: 0.34
@@ -2934,8 +3080,9 @@ function maskIP(value) {
   return raw;
 }
 
-function purityGaugeSVG(score, colors) {
+function purityGaugeSVG(score, colors, notes) {
   const value = Math.max(0, Math.min(100, Number(score) || 0));
+  const noteText = (notes || []).join(" · ");
 
   const cx = 75;
   const cy = 85;
@@ -2978,6 +3125,9 @@ function purityGaugeSVG(score, colors) {
     '<text x="75" y="61" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif" font-size="30" font-weight="850" fill="' + safeText + '">' + Math.round(value) + "</text>",
     '<text x="75" y="75" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif" font-size="10" font-weight="760" fill="' + safeMuted + '">/100</text>',
     '<text x="75" y="90" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif" font-size="10" font-weight="760" fill="' + safeMuted + '">纯净评分</text>',
+    noteText
+      ? '<text x="75" y="104" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif" font-size="8.5" font-weight="600" fill="' + safeMuted + '">' + noteText + "</text>"
+      : "",
     "</svg>"
   ].join("");
 }
@@ -4178,12 +4328,85 @@ function dnsTinyLabel(value) {
   return "未知";
 }
 
+function median(values) {
+  const sorted = (values || []).filter(function (v) {
+    return Number.isFinite(v) && v > 0;
+  }).sort(function (a, b) {
+    return a - b;
+  });
+
+  if (sorted.length === 0) return 0;
+
+  const mid = Math.floor(sorted.length / 2);
+
+  return sorted.length % 2 === 1
+    ? sorted[mid]
+    : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+const PLACE_NAME_FIX = {
+  "聖荷西": "圣何塞",
+  "圣荷西": "圣何塞",
+  "San Jose": "圣何塞",
+  "聖塔克拉拉": "圣塔克拉拉",
+  "聖地牙哥": "圣地亚哥",
+  "圣地牙哥": "圣地亚哥",
+  "洛杉磯": "洛杉矶",
+  "舊金山": "旧金山",
+  "紐約": "纽约",
+  "西雅圖": "西雅图",
+  "休斯頓": "休斯顿",
+  "達拉斯": "达拉斯",
+  "亞特蘭大": "亚特兰大",
+  "邁阿密": "迈阿密",
+  "波士頓": "波士顿",
+  "費城": "费城",
+  "鳳凰城": "凤凰城",
+  "拉斯維加斯": "拉斯维加斯",
+  "華盛頓": "华盛顿",
+  "加利福尼亞州": "加利福尼亚州",
+  "德克薩斯州": "德克萨斯州",
+  "佛羅里達州": "佛罗里达州",
+  "紐約州": "纽约州",
+  "華盛頓州": "华盛顿州",
+  "美國": "美国",
+  "中國": "中国"
+};
+
+const TRAD_TO_SIMP = {
+  "聖": "圣", "亞": "亚", "臺": "台", "灣": "湾", "區": "区",
+  "縣": "县", "兒": "儿", "奧": "奥", "韋": "韦", "爾": "尔",
+  "蘭": "兰", "羅": "罗", "馬": "马", "剋": "克", "漢": "汉",
+  "內": "内", "達": "达", "頓": "顿", "紐": "纽", "約": "约",
+  "圖": "图", "費": "费", "鳳": "凤", "維": "维", "麥": "麦",
+  "薩": "萨", "門": "门", "託": "托", "倫": "伦", "愛": "爱",
+  "華": "华", "舊": "旧", "裡": "里", "麼": "么"
+};
+
+function normalizePlaceName(value) {
+  let text = clean(value);
+
+  if (!text) return text;
+  if (PLACE_NAME_FIX[text]) return PLACE_NAME_FIX[text];
+
+  let out = "";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    out += TRAD_TO_SIMP[ch] || ch;
+  }
+
+  return PLACE_NAME_FIX[out] || out;
+}
+
 function purityScore(exit) {
   const flags = (exit && exit.flags) || {};
   const evidence = flags.evidence || {};
   const kind = clean(exit && exit.kind);
 
   let score;
+
+  const notes = [];
 
   if (kind === "住宅 IP") {
     score = 92;
@@ -4207,32 +4430,41 @@ function purityScore(exit) {
 
   if (torCount > 0 || flags.tor) {
     score -= 55;
+    notes.push("Tor -55");
   }
 
   if (abuserCount > 0 || flags.abuser) {
     score -= 35;
+    notes.push("滥用 -35");
   }
 
   if (proxyVpnEvidenceCount >= 2) {
-    score -= 30;
+    score -= 10;
+    notes.push("代理 -10");
   } else if (proxyVpnEvidenceCount === 1) {
-    score -= 16;
+    score -= 5;
+    notes.push("代理 -5");
   }
 
   if (Number.isFinite(riskValue)) {
     if (riskValue >= 80) {
       score -= 25;
+      notes.push("风险 -25");
     } else if (riskValue >= 70) {
       score -= 20;
+      notes.push("风险 -20");
     } else if (riskValue >= 40) {
       score -= 10;
+      notes.push("风险 -10");
     } else if (riskValue >= 20) {
       score -= 4;
+      notes.push("风险 -4");
     }
   }
 
   if (kind === "商业机房" || flags.datacenter || flags.hosting || flags.cloud) {
     score -= 8;
+    notes.push("机房 -8");
   }
 
   if (
@@ -4255,12 +4487,31 @@ function purityScore(exit) {
     score += 3;
   }
 
+  const abuseScore = Number(flags.abuseScore);
+
+  if (Number.isFinite(abuseScore) && abuseScore > 0) {
+    if (abuseScore >= 75) {
+      score -= 25;
+      notes.push("滥用举报 -25");
+    } else if (abuseScore >= 50) {
+      score -= 15;
+      notes.push("滥用举报 -15");
+    } else if (abuseScore >= 25) {
+      score -= 8;
+      notes.push("滥用举报 -8");
+    } else {
+      score -= 4;
+      notes.push("滥用举报 -4");
+    }
+  }
+
   score = Math.max(0, Math.min(100, Math.round(score)));
 
   return {
     score: score,
     risk: 100 - score,
-    evidence: evidence
+    evidence: evidence,
+    notes: notes
   };
 }
 
@@ -4594,7 +4845,9 @@ function timeLabel(date) {
   return (
     String(date.getHours()).padStart(2, "0") +
     ":" +
-    String(date.getMinutes()).padStart(2, "0")
+    String(date.getMinutes()).padStart(2, "0") +
+    ":" +
+    String(date.getSeconds()).padStart(2, "0")
   );
 }
 
