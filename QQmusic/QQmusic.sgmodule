@@ -4,6 +4,7 @@
 #!homepage=https://github.com/idodo777/Me/tree/main/QQmusic
 #!system=ios
 #!arguments=GETCK:true,LVZ:true,COIN:true
+#!arguments-desc=GETCK：抓 Cookie；LVZ：绿钻成长值签到；COIN：金币中心签到。
 
 # QQ音乐签到（Surge 版）
 # 原作: MaYIHEI

@@ -5,6 +5,7 @@
 #!icon=https://is1-ssl.mzstatic.com/image/thumb/Purple116/v4/83/d8/8a/83d88a92-5a4d-7a2f-118c-80d795e7a9f6/AppIcon-0-0-1x_U007emarketing-0-5-0-0-sRGB-85-220.png/144x144.png
 #!system=ios
 #!arguments=SGCC_USERNAME:-,SGCC_PASSWORD:-,SGCC_SMS:-,SGCC_ACCOUNT:-,SGCC_REGION:北京,SGCC_POLICY:DIRECT,SGCC_CHANNEL:auto,SGCC_REFRESH:6
+#!arguments-desc=SGCC_USERNAME：网上国网账号；SGCC_PASSWORD：网上国网密码；SGCC_SMS：短信验证码；SGCC_ACCOUNT：户号（可选）；SGCC_REGION：所在省份；SGCC_POLICY：国网请求策略；SGCC_CHANNEL：取数通道；SGCC_REFRESH：刷新间隔（小时）。
 
 # 网上国网（Hark 液态玻璃版）Surge 版
 # 原作: 自用二改，原作者 @Hantaoz

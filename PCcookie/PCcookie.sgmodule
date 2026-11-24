@@ -4,6 +4,7 @@
 #!homepage=https://github.com/idodo777/Me/tree/main/PCcookie
 #!system=ios
 #!arguments=WEIBOTALK:false,TENVIDEO:false,MIHOYO:false,NEWMIXC:false,MISHOP:false,MILOTTERY:false,YOUPIN:false,LHTJ:false,QQMUSIC:false,WANDA:false,TINGTINGFM:false,WPS:false,CAMSCANNER:false,DREAME:false,LINGHU:false,NODESEEK:false,PAN1:false,BAIDUNETDISK:false,LAIFEN:false,CMCC:false,HEYBOX:false,PPMT:false,TUHU:false,HAIDILAO:false,HUISHENG:false,MINISO:false,BHG:false,LONGDE:false,LHTJMP:false,WEDOME:false,LINLI:false
+#!arguments-desc=抓取 paperclip 全部在用签到脚本的 Cookie。WEIBOTALK：微博超话 Cookie；TENVIDEO：腾讯视频 Cookie；MIHOYO：米游社 Cookie；NEWMIXC：一点万象 Cookie；MISHOP：小米商城 Cookie；MILOTTERY：小米抽奖 Cookie；YOUPIN：有品 Cookie；LHTJ：龙湖App Cookie；QQMUSIC：QQ音乐 Cookie；WANDA：万达电影 Cookie；TINGTINGFM：听听FM Cookie；WPS：WPS Cookie；CAMSCANNER：扫描全能王 Cookie；DREAME：追觅 Cookie；LINGHU：灵狐灵购 Cookie；NODESEEK：NodeSeek Cookie；PAN1：123社区 Cookie；BAIDUNETDISK：百度网盘 Cookie；LAIFEN：徕芬 Cookie；CMCC：中国移动 Cookie；HEYBOX：小黑盒 Cookie；PPMT：泡泡玛特 Cookie；TUHU：途虎养车 Cookie；HAIDILAO：海底捞 Cookie；HUISHENG：惠省红包墙 Cookie；MINISO：名创优品 Cookie；BHG：北京华联 Cookie；LONGDE：龙德广场 Cookie；LHTJMP：龙湖天街 Cookie；WEDOME：味多美 Cookie；LINLI：林里 Cookie。
 
 # 蚂蚁Cookie合集（Surge 版）
 # 原作: MaYIHEI

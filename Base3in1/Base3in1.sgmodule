@@ -4,6 +4,7 @@
 #!homepage=https://github.com/idodo777/Me/tree/main/Base3in1
 #!system=ios
 #!arguments=Notify:开启通知
+#!arguments-desc=Notify：ScriptHub通知；默认开启通知；填“关闭通知”关闭通知。
 
 # 基础依赖 3in1（Surge 版）
 # 原作: ChavyLeung · sub-store-org · Script-Hub-Org

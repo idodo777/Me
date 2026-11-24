@@ -4,6 +4,7 @@
 #!homepage=https://github.com/idodo777/Me/tree/main/blockcheck
 #!system=ios
 #!arguments=POLICY:-
+#!arguments-desc=POLICY：节点名称；检测该节点是否可连接、是否被运营商/GFW 阻断。
 
 # 节点阻断检测（Surge 版，v6.0）
 # 结论：(b) 需改写 —— 上游原版不能直接在 Surge 里用，且功能与本地 v6.0 不一致。
