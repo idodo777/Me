@@ -1,0 +1,52 @@
+#!name=节点阻断检测
+#!desc=节点阻断检测
+#!author=idodo777
+#!homepage=https://github.com/idodo777/Me/tree/main/blockcheck
+#!system=ios
+
+# 节点阻断检测（Surge 版，v6.0）
+# 结论：(b) 需改写 —— 上游原版不能直接在 Surge 里用，且功能与本地 v6.0 不一致。
+# 上游原版（2026-11-24 实测仍在线，与本地存档 ~/workspace/github-me/blockcheck/block_check.js
+#   及 ~/workspace/blockcheck/source/block_check.js 两份 379 行存档内容一致）：
+#   https://gist.githubusercontent.com/RavelloH/383354955aa3800e1d7e98666e11e16f/raw/block_check.js
+#   作者 RavelloH（https://github.com/RavelloH），Quantumult X event-interaction 脚本。
+# 为什么不能直引（两条独立理由，任一条都足以否决直引）：
+#   1) API 全是 Quantumult X 专属，Surge 里不存在：$task.fetch（全脚本的请求都走它）、
+#      $configuration.sendMessage({action:"get_server_description"})（取节点服务器地址）、
+#      $environment.params（event-interaction 传入的节点名）、$done({htmlMessage})（QuanX 的
+#      HTML 渲染）。Surge 的 generic 脚本只有 $httpClient / $argument / $notification /
+#      $done({title, content, style})，没有 $task、没有 $configuration，$environment.params
+#      也不是 Surge 的参数入口。原版还是「长按节点 → 执行脚本」的 event-interaction 触发，
+#      Surge 里没有对应的触发方式。
+#   2) 功能方向完全不同：上游测的是「入站」——让 check-host.net 的多国探针从外面 TCP 连
+#      节点服务器（check-tcp / check-result），节点不通时再调 Globalping 从国内三大运营商
+#      探针 ping 服务器做阻断定位；必须先拿到服务器 host:port。本地 v6.0 是重设计的「出站」
+#      探测：经指定策略依次请求日/美/英/德/韩/新六国 Google generate_204 计延迟，不需要
+#      服务器地址，已去掉 check-host 入站探测与 Globalping 国内探测。直引上游等于把功能
+#      换成另一个东西，六国探测会丢掉。
+# 改写做法：复用已转换好的 block_check-surge.js（278 行，检测逻辑原样，Egern ctx 桥已去、
+#   改接 Surge 原生 API：ctx.http.get → $httpClient.get（含 policy 选项），ctx.env.POLICY
+#   由 [Script] 的 argument 传入，通知走 $notification.post；Egern 小组件 DSL 整段删除、
+#   面板调用时改用 $done({title, content, style})）。本文件只改注释说明，JS 未动。
+#   转换文件：~/workspace/surge-modules/js/blockcheck/block_check-surge.js（node --check 已过，见下）
+# Egern 版：blockcheck/blockcheck.yaml（v6.0，1 条 generic 脚本 block-check，
+#   update_interval 300、timeout 30；配 1 个 widgets；env_schema 只有 POLICY 一个参数）。
+# 注意：script-path 目前是占位 URL（假设最终进仓库 idodo777/Me 的 blockcheck/ 目录），
+#   待协调员决定托管位置/统一推送后再确认；不要自行推仓库。
+# 注意：Egern 的 update_interval 300（小组件刷新间隔）在 [Script] 里没有对应项，
+#   Surge 里刷新间隔由 [Panel] 的 update-interval 控制，本模块未写 [Panel] 段。
+# 小组件：本模块不写 [Panel]/[Widget] 段。Surge 里没有与 Egern widgets 一一对应的段，
+#   与 Egern 小组件最接近的是 Information Panel（[Panel] 段 + 脚本 $done 返回
+#   title/content/style），不是 iOS 主屏幕小组件；脚本已按面板调用约定写好 $done 返回，
+#   需要时可由父代理补 [Panel] 段。小组件需在 Surge App 里手动添加（选该 generic 脚本
+#   作数据源），Egern 的小组件渲染代码在 Surge 里不生效。
+# 待实测（见 JS 文件头）：POLICY 留空时 $httpClient 不带 policy，走 Surge 默认出站，
+#   是否等价于 Egern 的「留空按分流规则（兜底策略）」手册未明说；checkDirect 的 policy:"DIRECT"
+#   能否按名字传未经实测（若被拒，本机网络会被误判异常）；POLICY 若指向外部策略组
+#   （policy-path）成员名，按名字引用不到，须用其 identifier。
+
+[Argument]
+POLICY =
+
+[Script]
+block-check = type=generic, script-path=https://raw.githubusercontent.com/idodo777/Me/main/blockcheck/block_check-surge.js, timeout=30, argument=POLICY={{{POLICY}}}

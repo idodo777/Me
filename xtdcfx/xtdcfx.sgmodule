@@ -1,0 +1,16 @@
+#!name=系统电池分析
+#!desc=解锁会员
+#!author=ddm1023
+#!homepage=https://github.com/idodo777/Me/tree/main/xtdcfx
+#!system=ios
+
+# 系统电池分析（Surge 版）
+# 原作: ddm1023
+# Egern 版: xtdcfx/xtdcfx.yaml（声明式重 build 版，无 JS）
+# 转换: 1 条 response_jq 原样转 http-response-jq；MITM 主机原样。
+
+[Body Rewrite]
+http-response-jq ^https?://apis\.zhangthree\.cn/vip/storekit/purchases/sync 'if type != "object" then . elif (.data | type) != "object" then . else .data += {"member":true,"adFree":true,"entitlementStatus":"ACTIVE","risk":"LOW","action":"ALLOW","serverVerifiedUntil":"2099-09-09T09:09:09Z","vip":true,"expiresAt":"2099-09-09T09:09:09Z","privileges":["member","vip","ad_free"],"offlineGraceUntil":"2099-09-09T09:09:09Z","signedEntitlementToken":"TEST_SIGNED_ENTITLEMENT_TOKEN"} end'
+
+[MITM]
+hostname = %APPEND% apis.zhangthree.cn

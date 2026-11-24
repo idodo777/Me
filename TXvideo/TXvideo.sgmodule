@@ -1,0 +1,36 @@
+#!name=腾讯视频净化
+#!desc=腾讯视频去广告
+#!author=ZenmoFeiShi
+#!homepage=https://github.com/idodo777/Me/tree/main/TXvideo
+#!system=ios
+
+# 腾讯视频净化（Surge 版）
+# 原作: ZenmoFeiShi（TG@ZenMoFiShi）
+# 上游来源: https://raw.githubusercontent.com/ZenmoFeiShi/Qx/refs/heads/main/TxvideoAD.snippet
+# 上游更新日期: 2026-11-03
+# 拦截数量: 2
+# 脚本数量: 5
+# Egern 版: TXvideo/TXvideo.yaml（script_url 带 ?v=1）
+# 结论: 需改写，不能直引上游 JS（2026-11-24 核实）。
+#   上游 Txvideoad.js 是纯逻辑 IIFE，无 $task/$prefs/Env，但入口用的是 QuanX 的
+#   二进制 body 写法：$request.bodyBytes / $response.bodyBytes / $done({bodyBytes})。
+#   Surge 手册只认 $request.body / $response.body（binary-body-mode=true 时为
+#   ArrayBuffer）与 $done({body})，没有 bodyBytes；直引会在 4 条二进制入口上
+#   静默失效（toU8(undefined) 得 null，只剩 rdelivery 一路 JSON 文本能跑）。
+#   因此复用已转换的 TXvideo-surge.js：净化逻辑与上游逐行一致（747 行核心零改动，
+#   仅出口 return 行 + Surge 入口 32 行），只把 bodyBytes 换成 Surge 的 .body。
+# 注意: script-path 目前是占位 URL，待确认 Surge 版 JS 的托管位置后再替换。
+
+[Rule]
+DOMAIN,iacc.stgw.qq.com,REJECT
+DOMAIN,tacc.video.qq.com,REJECT
+
+[MITM]
+hostname = %APPEND% i.video.qq.com, iacc.qq.com, config.ab.qq.com, rdelivery.qq.com
+
+[Script]
+腾讯视频请求净化 = type=http-request, pattern=^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$, script-path=https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo-surge.js, requires-body=true, binary-body-mode=true, timeout=30
+腾讯视频响应净化 = type=http-response, pattern=^https?:\/\/i\.video\.qq\.com\/(?:\?.*)?$, script-path=https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo-surge.js, requires-body=true, binary-body-mode=true, timeout=30
+腾讯视频iacc净化 = type=http-response, pattern=^https?:\/\/iacc\.qq\.com\/(?:\?.*)?$, script-path=https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo-surge.js, requires-body=true, binary-body-mode=true, timeout=30
+腾讯视频AB配置净化 = type=http-response, pattern=^https?:\/\/config\.ab\.qq\.com\/tab\/GetTabRemoteConfig(?:\?.*)?$, script-path=https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo-surge.js, requires-body=true, binary-body-mode=true, timeout=30
+腾讯视频rdelivery净化 = type=http-response, pattern=^https:\/\/rdelivery\.qq\.com\/v1\/sdkconfig\/get(?:\?.*)?$, script-path=https://raw.githubusercontent.com/idodo777/Me/main/TXvideo/TXvideo-surge.js, requires-body=true, timeout=30

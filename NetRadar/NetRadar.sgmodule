@@ -1,0 +1,20 @@
+#!name=网络雷达
+#!desc=显示本机与节点 IP、延迟，以及流媒体与 AI 服务解锁状态
+#!author=lylywayr
+#!homepage=https://github.com/idodo777/Me/tree/main/NetRadar
+#!icon=network
+#!system=ios
+
+# 网络雷达（Surge 版）
+# 原作: lylywayr
+# 上游来源: https://raw.githubusercontent.com/lylywayr/NetWork-Module/refs/heads/main/Egern/%E7%BD%91%E7%BB%9C%E8%AF%8A%E6%96%AD%E9%9B%B7%E8%BE%BE/%E7%BD%91%E7%BB%9C%E8%AF%8A%E6%96%AD%E9%9B%B7%E8%BE%BE.js
+# 上游更新时间: 2026.07.09 10:49
+# Egern 版: NetRadar/NetRadar.yaml（1 条 generic 脚本 netradar-widget，update_interval 300、timeout 30；配 1 个 widgets）
+# 注意: 上游仓库 lylywayr/NetWork-Module 里没有 Surge 版同名脚本（2026-11-24 递归查全库 467 个文件，
+#   仅 Egern/网络诊断雷达/网络诊断雷达.js 一个同名脚本），故 script-path 沿用上游 Egern 版地址；
+#   该脚本是 Egern 专用写法，Surge 下可能不工作，需用户实测。
+# 小组件: Surge 里没有与 Egern widgets 一一对应的段，脚本仅以 type=generic 放进 [Script]；
+#   小组件需在 Surge App 里手动添加（选该 generic 脚本作数据源），Egern 的小组件渲染代码在 Surge 里可能不生效，需用户实测。
+
+[Script]
+netradar-widget = type=generic, script-path=https://raw.githubusercontent.com/lylywayr/NetWork-Module/refs/heads/main/Egern/%E7%BD%91%E7%BB%9C%E8%AF%8A%E6%96%AD%E9%9B%B7%E8%BE%BE/%E7%BD%91%E7%BB%9C%E8%AF%8A%E6%96%AD%E9%9B%B7%E8%BE%BE.js, timeout=30

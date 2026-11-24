@@ -1,0 +1,47 @@
+#!name=网上国网（Hark 液态玻璃版）
+#!desc=国家电网电费余额、昨日/本月/上月用电，近 30 日与月度柱状图
+#!author=自用二改，原作者 @Hantaoz
+#!homepage=https://github.com/idodo777/Me/tree/main/wsgg
+#!icon=https://is1-ssl.mzstatic.com/image/thumb/Purple116/v4/83/d8/8a/83d88a92-5a4d-7a2f-118c-80d795e7a9f6/AppIcon-0-0-1x_U007emarketing-0-5-0-0-sRGB-85-220.png/144x144.png
+#!system=ios
+
+# 网上国网（Hark 液态玻璃版）Surge 版
+# 原作: 自用二改，原作者 @Hantaoz
+# 上游: https://raw.githubusercontent.com/zhaohantao1360-hash/Hark/main/sgcc-hark.yaml
+#   上游 JS: https://raw.githubusercontent.com/zhaohantao1360-hash/Hark/main/sgcc-hark.js
+#   （SG_VER 20261026-0910；上游仓库里只有 sgcc-hark.js/.yaml，没有 Surge 版）
+# 结论: 需改写，不能直引上游 JS（2026-11-24 核实）：
+#   1) 上游 JS 是纯 Egern 专属写法：入口 export default async function (ctx)，
+#      全文件 26 处 ctx.env / ctx.storage / ctx.http / ctx.notify / ctx.widgetFamily，
+#      0 处 $httpClient / $argument，无 Env 类；Surge 里没有 ctx，直引跑不了。
+#   2) 本地二改的功能上游没有：SGCC_REGION 省份选择 + provinces.json 31 省阶梯电价表
+#      （月/双月/年度阶梯周期 + 各省单价），上游只有 SGCC_TIERS 手填分界度数，非北京
+#      省份默认无阶梯价；另有两处余额口径修复（后付费有预存时不再误报欠费）。
+#   3) 液态玻璃渲染、双通道 auto/app/web + 95598 网页备用、SM2/SM3/SM4 协议均为上游自带，
+#      改写版原样保留。
+# 改写: 复用已转换好的 wsgg-surge.js（Egern 版 wsgg.js 去 export default / ctx 包装，
+#   顶加 __ctx 桥把 ctx.storage / ctx.http / ctx.notify 接到 Surge 原生 API，
+#   开头解析 $argument 进 ctx.env；原逻辑逐字保留，node --check 通过）。
+#   8 个 SGCC_* 参数由 [Argument] 传入，脚本开头解析 $argument 后进 ctx.env；
+#   SGCC_SCHEDULE=true 只在 cron 那条 [Script] 行里传（定时更新模式）。
+# 注意: script-path 目前是占位 URL，待确认 Surge 版 JS 的托管位置后再替换。
+# 注意: Surge 里没有与 Egern widgets 一一对应的段，小组件需在 Surge App 里手动
+#   添加（选 generic 脚本作数据源）；Egern 的小组件渲染对象在 Surge 里是否生效
+#   未验证，需用户实测。
+# 注意: SGCC_POLICY 在 Surge 的 $httpClient 里没有按请求指定策略的选项，收下但不生效，
+#   请求走 Surge 默认路由。
+# 注意: widgetFamily 在 Surge 通用脚本里没有对应取值，桥里默认 'systemMedium'（中号布局）。
+
+[Argument]
+SGCC_USERNAME =
+SGCC_PASSWORD =
+SGCC_SMS =
+SGCC_ACCOUNT =
+SGCC_REGION = 北京
+SGCC_POLICY = DIRECT
+SGCC_CHANNEL = auto
+SGCC_REFRESH = 6
+
+[Script]
+wsgg = type=generic, script-path=https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg-surge.js, timeout=90, argument=SGCC_USERNAME={{{SGCC_USERNAME}}}&SGCC_PASSWORD={{{SGCC_PASSWORD}}}&SGCC_SMS={{{SGCC_SMS}}}&SGCC_ACCOUNT={{{SGCC_ACCOUNT}}}&SGCC_REGION={{{SGCC_REGION}}}&SGCC_POLICY={{{SGCC_POLICY}}}&SGCC_CHANNEL={{{SGCC_CHANNEL}}}&SGCC_REFRESH={{{SGCC_REFRESH}}}
+网上国网定时更新 = type=cron, cron="17 */6 * * *", script-path=https://raw.githubusercontent.com/idodo777/Me/main/wsgg/wsgg-surge.js, wake-system=true, timeout=90, argument=SGCC_USERNAME={{{SGCC_USERNAME}}}&SGCC_PASSWORD={{{SGCC_PASSWORD}}}&SGCC_SMS={{{SGCC_SMS}}}&SGCC_ACCOUNT={{{SGCC_ACCOUNT}}}&SGCC_REGION={{{SGCC_REGION}}}&SGCC_POLICY={{{SGCC_POLICY}}}&SGCC_CHANNEL={{{SGCC_CHANNEL}}}&SGCC_REFRESH={{{SGCC_REFRESH}}}&SGCC_SCHEDULE=true

@@ -1,0 +1,88 @@
+#!name=蚂蚁Cookie合集
+#!desc=Cookie共33条 · 上游更新2026-10-28 · 作者MaYIHEI
+#!author=MaYIHEI
+#!homepage=https://github.com/idodo777/Me/tree/main/PCcookie
+#!system=ios
+
+# 蚂蚁Cookie合集（Surge 版）
+# 原作: MaYIHEI
+# 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/loon/paperclip-cookie/paperclip-cookie.lpx
+# 上游更新日期: 2026-10-28
+# Egern 版: PCcookie/PCcookie.yaml（script_url ?v=2）
+# 转换: 31 个脚本由 Egern 版去桥转换而来（js/PCcookie/*-surge.js），逻辑原样；
+#   开关由 [Argument] 传入，脚本开头解析 $argument 后判断，关闭时直接 $done({}) 放行。
+# 必须改写原因: 上游 surge/ 目录只有 README（暂无模块）、全仓无 .sgmodule；
+#   上游 31 个原始 .js 虽是 Env 写法、Surge 能跑，但不读任何分应用开关（$argument 只用于 .merge 汇总通知），
+#   .lpx 说明亦写明“没有单独开关，整个插件就是开关”；直引会丢掉 31 个开关，故按试点方法去桥转换。
+# 注意: script-path 目前是占位 URL，待确认 Surge 版 JS 的托管位置后再替换。
+
+[Argument]
+WEIBOTALK = false
+TENVIDEO = false
+MIHOYO = false
+NEWMIXC = false
+MISHOP = false
+MILOTTERY = false
+YOUPIN = false
+LHTJ = false
+QQMUSIC = false
+WANDA = false
+TINGTINGFM = false
+WPS = false
+CAMSCANNER = false
+DREAME = false
+LINGHU = false
+NODESEEK = false
+PAN1 = false
+BAIDUNETDISK = false
+LAIFEN = false
+CMCC = false
+HEYBOX = false
+PPMT = false
+TUHU = false
+HAIDILAO = false
+HUISHENG = false
+MINISO = false
+BHG = false
+LONGDE = false
+LHTJMP = false
+WEDOME = false
+LINLI = false
+
+[MITM]
+hostname = %APPEND% api.weibo.cn, pbaccess.video.qq.com, vip.video.qq.com, api-takumi.miyoushe.com, api-takumi.mihoyo.com, app.mixcapp.com, shop-api.retail.mi.com, m.xiaomiyoupin.com, gw2c-hw-open.longfor.com, u6.y.qq.com, user-api-prd-mx.wandafilm.com, xunting.vbegin.com.cn, personal-act.wps.cn, api-cs.intsig.net, cn-wxmall.dreame.tech, cn-yx-wxmall.dreame.tech, www.nodeseek.com, pan1.me, pan.baidu.com, app-gw.shuye.com, client.app.coc.10086.cn, clientaccess.10086.cn, h5.bj.10086.cn, api.xiaoheihe.cn, popvip.paquapp.com, api.tuhu.cn, superapp-public.kiwa-tech.com, media.meituan.com, member-center.miniso.com, a.china-smartech.com, scrm-b.zjian.net, webapi.qmai.cn
+
+[Script]
+微博超话 Cookie = type=http-request, pattern=^https://api\.weibo\.cn/2/(statuses/container_timeline_topicsub|page/button), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/weibotalk-surge.js, requires-body=true, timeout=30, argument=WEIBOTALK={{{WEIBOTALK}}}
+腾讯视频 Cookie = type=http-request, pattern=^https://pbaccess\.video\.qq\.com/, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/tenvideo-surge.js, timeout=30, argument=TENVIDEO={{{TENVIDEO}}}
+米游社 Cookie = type=http-response, pattern=^https://api-takumi\.(miyoushe|mihoyo)\.com/(binding/api/getUserGameRolesByStoken|event/luna/), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/mihoyo-surge.js, requires-body=true, timeout=30, argument=MIHOYO={{{MIHOYO}}}
+一点万象 Cookie = type=http-request, pattern=^https://app\.mixcapp\.com/mixc/api/v4/member/getPersonalData, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/newmixc-surge.js, timeout=30, argument=NEWMIXC={{{NEWMIXC}}}
+小米商城 Cookie = type=http-request, pattern=^https://shop-api\.retail\.mi\.com/mtop/mf/act/infinite/(do|done), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/mishop-surge.js, timeout=30, argument=MISHOP={{{MISHOP}}}
+小米抽奖 Cookie = type=http-request, pattern=^https://shop-api\.retail\.mi\.com/mtop/navi/venue/batch, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/milottery-surge.js, requires-body=true, timeout=30, argument=MILOTTERY={{{MILOTTERY}}}
+有品 Cookie = type=http-request, pattern=^https://m\.xiaomiyoupin\.com/mtop/act/redPacketSign/getActInfo, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/youpin-surge.js, timeout=30, argument=YOUPIN={{{YOUPIN}}}
+龙湖App Cookie = type=http-request, pattern=^https://gw2c-hw-open\.longfor\.com/lmarketing-task-api-mvc-prod/openapi/task/v1/signature/clock$, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/lhtj-surge.js, timeout=30, argument=LHTJ={{{LHTJ}}}
+QQ音乐 Cookie = type=http-request, pattern=^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/qqmusic-surge.js, requires-body=true, timeout=30, argument=QQMUSIC={{{QQMUSIC}}}
+万达电影 Cookie = type=http-request, pattern=^https://user-api-prd-mx\.wandafilm\.com/user/user_info, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/wanda-surge.js, timeout=30, argument=WANDA={{{WANDA}}}
+听听FM Cookie = type=http-request, pattern=^https://xunting\.vbegin\.com\.cn/sns/app, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/tingtingfm-surge.js, timeout=30, argument=TINGTINGFM={{{TINGTINGFM}}}
+WPS Cookie = type=http-request, pattern=^https://personal-act\.wps\.cn/activity-rubik/activity/page_info, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/wps-surge.js, timeout=30, argument=WPS={{{WPS}}}
+扫描全能王 Cookie = type=http-request, pattern=^https://api-cs\.intsig\.net/user/cs/get_user_attribute, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/camscanner-surge.js, timeout=30, argument=CAMSCANNER={{{CAMSCANNER}}}
+追觅 Cookie = type=http-request, pattern=^https://cn-wxmall\.dreame\.tech/main/my/info, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/dreame-surge.js, requires-body=true, timeout=30, argument=DREAME={{{DREAME}}}
+灵狐灵购 Cookie = type=http-request, pattern=^https://cn-yx-wxmall\.dreame\.tech/main/my/info, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/linghu-surge.js, requires-body=true, timeout=30, argument=LINGHU={{{LINGHU}}}
+NodeSeek Cookie = type=http-request, pattern=^https://www\.nodeseek\.com/, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/nodeseek-surge.js, timeout=30, argument=NODESEEK={{{NODESEEK}}}
+123社区 Cookie = type=http-request, pattern=^https://pan1\.me/(\?|$), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/pan1-surge.js, timeout=30, argument=PAN1={{{PAN1}}}
+百度网盘 Cookie = type=http-request, pattern=^https://pan\.baidu\.com/coins/taskcenter/signinlist, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/baidunetdisk-surge.js, timeout=30, argument=BAIDUNETDISK={{{BAIDUNETDISK}}}
+徕芬 Cookie = type=http-request, pattern=^https://app-gw\.shuye\.com/member/user/profile, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/laifen-surge.js, timeout=30, argument=LAIFEN={{{LAIFEN}}}
+中国移动 Cookie（自动登录） = type=http-request, pattern=^https://client\.app\.coc\.10086\.cn/biz-orange/[LD]N/uam(onekey|randcode)login/autoLogin, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/cmcc-surge.js, requires-body=true, timeout=30, argument=CMCC={{{CMCC}}}
+中国移动 Cookie（积分查询） = type=http-request, pattern=^https://clientaccess\.10086\.cn/biz-orange/BN/scoreQueryService/getScoreQuery, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/cmcc-surge.js, requires-body=true, timeout=30, argument=CMCC={{{CMCC}}}
+中国移动 Cookie（北京签到） = type=http-request, pattern=^https://h5\.bj\.10086\.cn/ActSignIn2023/doPrize, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/cmcc-surge.js, timeout=30, argument=CMCC={{{CMCC}}}
+小黑盒 Cookie = type=http-request, pattern=^https://api\.xiaoheihe\.cn/task/sign_list, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/heybox-surge.js, timeout=30, argument=HEYBOX={{{HEYBOX}}}
+泡泡玛特 Cookie = type=http-response, pattern=^https://popvip\.paquapp\.com/miniapp/v2/(svip_lite/user_info|wechat_message/template_info), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/ppmt-surge.js, requires-body=true, timeout=30, argument=PPMT={{{PPMT}}}
+途虎养车 Cookie = type=http-request, pattern=^https://api\.tuhu\.cn/User/(GetMemberSignInInfoAsync|GetRightsList), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/tuhu-surge.js, timeout=30, argument=TUHU={{{TUHU}}}
+海底捞 Cookie = type=http-request, pattern=^https://superapp-public\.kiwa-tech\.com/activity/wxapp/signin/(query|querySite|querySwitch|queryFragment|signin), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/haidilao-surge.js, timeout=30, argument=HAIDILAO={{{HAIDILAO}}}
+惠省红包墙 Cookie = type=http-request, pattern=^https://media\.meituan\.com/fulishemini/couponActivity/listActivityCoupon, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/huisheng-surge.js, requires-body=true, timeout=30, argument=HUISHENG={{{HUISHENG}}}
+名创优品 Cookie = type=http-request, pattern=^https://member-center\.miniso\.com/userinfo/userinfo/GetUserInfoV3, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/miniso-surge.js, timeout=30, argument=MINISO={{{MINISO}}}
+北京华联 Cookie = type=http-request, pattern=^https://a\.china-smartech\.com/restful/mall/\d+/checkInForm, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/bhg-surge.js, timeout=30, argument=BHG={{{BHG}}}
+龙德广场 Cookie = type=http-request, pattern=^https://a\.china-smartech\.com/restful/mall/\d+/checkInForm, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/longde-surge.js, timeout=30, argument=LONGDE={{{LONGDE}}}
+龙湖天街 Cookie = type=http-request, pattern=^https://gw2c-hw-open\.longfor\.com/lmarketing-task-api-mvc-prod/openapi/task/v1/signature/clock$, script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/lhtjmp-surge.js, timeout=30, argument=LHTJMP={{{LHTJMP}}}
+味多美 Cookie = type=http-response, pattern=^https://scrm-b\.zjian\.net/api/member/(minaLogin|find), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/wedome-surge.js, requires-body=true, timeout=30, argument=WEDOME={{{WEDOME}}}
+林里 Cookie = type=http-request, pattern=^https://webapi\.qmai\.cn/web/(cmk-center/sign/(activityInfo|userSignStatistics|userSignRecordCalendar)|catering/common/common-info|mall-apiserver/integral/(home/index|item/goods(/detail)?)), script-path=https://raw.githubusercontent.com/idodo777/Me/main/PCcookie/linli-surge.js, requires-body=true, timeout=30, argument=LINLI={{{LINLI}}}

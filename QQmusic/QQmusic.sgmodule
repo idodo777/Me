@@ -1,0 +1,41 @@
+#!name=QQ音乐签到
+#!desc=QQ音乐签到
+#!author=MaYIHEI
+#!homepage=https://github.com/idodo777/Me/tree/main/QQmusic
+#!system=ios
+
+# QQ音乐签到（Surge 版）
+# 原作: MaYIHEI
+# 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/qqmusic/qqmusic.js
+# 上游更新日期: 2026-10-28（版本 2026-10-28.r3，已与改写版逐行 diff 核对）
+# Egern 版: QQmusic/QQmusic.yaml（v9，只剩抓 Cookie + 绿钻/金币签到，每日 07:30）
+#
+# 结论：改写（不能直接引用上游），原因有三：
+#   1. 上游不解析 $argument：全文件只在 $.merge 一处用到 $argument，且要求它是对象
+#      （typeof $argument === "object" && $argument.merge === true）；Surge 传的是
+#      "k=v&k=v" 字符串，merge 恒为 false——开关根本传不进去。
+#   2. 上游开关靠 BoxJS 写 storage：taskOff() 只读 $.getdata(key)，上游只有
+#      qqmusic_task_activity / qqmusic_task_favorite 两个键，且默认全开；
+#      LVZ/COIN 两个开关是 Egern v9 自加的，上游根本没有对应键，checkin() 里绿钻与
+#      金币签到是无条件执行的。没有 BoxJS 的 Surge 环境里开关会永远卡在"开"。
+#   3. 上游行为超出 v9 范围：直引会重新打开用户已永久关闭的每日领奖/收藏任务、
+#      抽奖签到、定时金币、红包雨（上游 checkin() 默认全跑）；且 getCookie() 无
+#      GETCK 门控，关了抓 Cookie 开关也照抓。
+# 改写方式（最小改写）：上游逻辑原样，仅做三处——①文件开头加 $argument 解析 +
+#   LVZ/COIN 同步进 storage + GETCK 关闭时 http-request 直接放行；②checkin() 按
+#   v9 门控（LVZ/COIN 分控、activity 恒 false、claimDailyTaskRewards 入口去掉）；
+#   ③taskOff() 去掉 Egern ctx.env 分支（Surge 里 ctx 不存在，死代码），只读 storage。
+#   其余与上游逐行 diff 一致（含 Env 类，getEnv 检测 $environment["surge-version"] 走 Surge 原生 API）。
+# 注意: script-path 目前是占位 URL，待确认 Surge 版 JS 的托管位置后再替换。
+
+[Argument]
+GETCK = true
+LVZ = true
+COIN = true
+
+[MITM]
+hostname = %APPEND% u6.y.qq.com
+
+[Script]
+QQ音乐Cookie = type=http-request, pattern=^https://u6\.y\.qq\.com/cgi-bin/musics\.fcg\?.*(EveryDaySignLvzScore|GetSignInSummary), script-path=https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic-surge.js, requires-body=true, timeout=30, argument=GETCK={{{GETCK}}}&LVZ={{{LVZ}}}&COIN={{{COIN}}}
+QQ音乐每日任务 = type=cron, cron="30 7 * * *", script-path=https://raw.githubusercontent.com/idodo777/Me/main/QQmusic/QQmusic-surge.js, wake-system=true, timeout=60, argument=GETCK={{{GETCK}}}&LVZ={{{LVZ}}}&COIN={{{COIN}}}
