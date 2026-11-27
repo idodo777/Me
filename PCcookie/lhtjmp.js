@@ -1,4 +1,5 @@
 // 【改版 2026-11-27】抓到 CK 即上传青龙接收器（POST /ck，全部上传）；原版只存手机本地。
+// 【改版 2026-11-27】每次抓取都有提醒：成功/失败/未变/未填地址口令（绝不静默）。
 // lhtjmp · Cookie 抓取（Egern 移植版）
 // 原作: MaYIHEI
 // 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/miniprogram/lhtj/lhtj.js
@@ -58,21 +59,31 @@ export default async function (ctx) {
   globalThis.$httpClient = { get: __mk("GET"), post: __mk("POST"), put: __mk("PUT"), delete: __mk("DELETE"), head: __mk("HEAD"), options: __mk("OPTIONS"), patch: __mk("PATCH") };
   // ---------- CK 同步改版：抓到即上传青龙接收器（只留改版，原版无此段） ----------
   const __CK_APP = "lhtjmp";
+  const __CK_NAME = "龙湖天街";
   const __CK_SYNC_URL = (ctx.env && ctx.env.CK_SYNC_URL ? String(ctx.env.CK_SYNC_URL) : "").replace(/\/+$/, "");
   const __CK_TOKEN = (ctx.env && ctx.env.CK_SYNC_TOKEN) ? String(ctx.env.CK_SYNC_TOKEN) : "";
+  function __ckNotify(t, b) { try { ctx.notify({ title: t, body: b }); } catch (e) {} }
   function __ckUpload(v, k) {
     try {
-      if (!__CK_SYNC_URL || !__CK_TOKEN) return;
       const __val = v == null ? "" : String(v);
       if (__val.length < 16) return;
       const __key = String(k || "");
       const __kl = __key.toLowerCase();
       if (__kl.indexOf("status") !== -1 || __kl.indexOf("registry") !== -1 || __kl.indexOf("checkin") !== -1) return;
+      if (!__CK_SYNC_URL || !__CK_TOKEN) { __ckNotify(__CK_NAME + " CK未上传", "没填同步服务器地址或口令，在模块设置里填 CK_SYNC_URL / CK_SYNC_TOKEN"); return; }
       let __old = null;
       try { __old = ctx.storage.get("__ck_sent_" + __key); } catch (e) {}
-      if (__old === __val) return;
+      if (__old === __val) { __ckNotify(__CK_NAME + " CK已是最新", "CK 未变，无需重复上传"); return; }
       try { ctx.storage.set("__ck_sent_" + __key, __val); } catch (e) {}
-      ctx.http.post(__CK_SYNC_URL + "/ck", { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: __CK_TOKEN, app: __CK_APP, key: __key, value: __val }) }).catch(function () {});
+      ctx.http.post(__CK_SYNC_URL + "/ck", { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: __CK_TOKEN, app: __CK_APP, key: __key, value: __val }) })
+        .then(function (__resp) { return (__resp && typeof __resp.text === "function") ? __resp.text() : ""; })
+        .then(function (__text) {
+          var __ok = false, __err = "";
+          try { var __d = JSON.parse(__text || ""); __ok = !!(__d && __d.ok); __err = (__d && __d.error) ? String(__d.error) : ""; } catch (e) { __err = "返回无法解析"; }
+          if (__ok) __ckNotify(__CK_NAME + " CK捕获成功", "已上传青龙");
+          else __ckNotify(__CK_NAME + " CK捕获失败", "服务器返回：" + (__err || "未知错误"));
+        })
+        .catch(function (e) { __ckNotify(__CK_NAME + " CK捕获失败", "连不上服务器：" + (e && e.message ? e.message : String(e))); });
     } catch (e) {}
   }
   globalThis.$persistentStore = {
