@@ -7,43 +7,16 @@
 # 组成:
 #   1. 蚂蚁Cookie合集（Egern 版）原作 MaYIHEI，上游更新 2026-10-28，脚本 33 个
 #      上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/loon/paperclip-cookie/paperclip-cookie.lpx
-#   2. 京东 wskey 抓取（Egern 原生版）参照 githubdulong/Script JDWSKey.js 改写
-#      抓到 wskey 即 POST 到本机接收器，自动写青龙 JD_WSCK 并触发转换
-#   3. 京东比价 + 京粉转链（Egern 原生版）参照 Tartarus2014/Script jdjf_price.js 与 jf_Convert.js 改写，自托管 Me/JDprice/
+# 京东、京粉相关已移出，见单独模块 Me/JDjf/（京东 wskey 同步 + 一键转京粉返利链接）
 # 拦截数量: 0
-# 脚本数量: 36
+# 脚本数量: 33
 #
 # 同步口令 CK_SYNC_TOKEN 由用户在模块设置页填写，口令只存服务器 /opt/ck-sync/token，绝不写入本文件
 name: CK同步合集
-description: CK抓取34条 · 京东比价返利2条 · 京东wskey自动同步青龙 0.3
+description: CK抓取33条 · 自动同步青龙 0.4
 author: MaYIHEI
 homepage: https://github.com/MaYIHEI/paperclip/tree/main/loon/paperclip-cookie
 env_schema:
-  JDWSKEY:
-    name: "京东 wskey 同步"
-    description: "打开京东 App 即抓 wskey，自动同步到青龙"
-    default_value: "false"
-    options:
-    - "true"
-    - "false"
-  JDPRICE:
-    name: "京东比价"
-    description: "打开京东商品详情，推送历史最低价+京粉返利"
-    default_value: "true"
-    options:
-    - "true"
-    - "false"
-  JFCONVERT:
-    name: "京粉转链"
-    description: "打开京东商品详情，推送京粉返利转链（与京东比价重复，可只开一个）"
-    default_value: "false"
-    options:
-    - "true"
-    - "false"
-  JFCOOKIE:
-    name: "京粉 Cookie"
-    description: "京粉返利要用的 Cookie，没有只显示历史价"
-    default_value: ""
   CK_SYNC_URL:
     name: "同步服务器地址"
     description: "CK 接收器地址，在模块设置里填"
@@ -270,21 +243,6 @@ env_schema:
     - "true"
     - "false"
 scriptings:
-- http_response:
-    name: 京东 wskey 同步
-    match: '^https://api\.m\.jd\.com/client\.action\?functionId=newUserInfo'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/CKsync/jd-wskey.js?v=1
-    body_required: true
-- http_response:
-    name: 京东比价
-    match: '^https://api\.m\.jd\.com/(client\.action|api)\?functionId=(wareBusiness|serverConfig|basicConfig|lite_wareBusiness|pingou_item)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDprice/jd-price.js?v=1
-    body_required: true
-- http_response:
-    name: 京粉转链
-    match: '^https://api\.m\.jd\.com/(client\.action|api)\?functionId=(wareBusiness|serverConfig|basicConfig|lite_wareBusiness|pingou_item)'
-    script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDprice/jf-convert.js?v=1
-    body_required: true
 - http_request:
     name: 微博超话 Cookie
     match: '^https://api\.weibo\.cn/2/(statuses/container_timeline_topicsub|page/button)'
@@ -431,7 +389,6 @@ scriptings:
     body_required: true
 mitm:
   hostnames:
-    - api.m.jd.com
     - api.weibo.cn
     - pbaccess.video.qq.com
     - vip.video.qq.com
