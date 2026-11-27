@@ -1,0 +1,42 @@
+# 京东京粉转链（Egern 版）
+# 上游作者：Tartarus2014（脚本）/ sempliciy（Surge 模块）
+# 上游更新：脚本 2021-11-03；模块 2022-06-08
+# 拦截数量：1（api.m.jd.com）
+# 脚本数量：1（jdjf.js，合并上游 jdjf_price.js 与 jf_Convert.js）
+# 上游来源：https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
+# 脚本来源：https://github.com/Tartarus2014/Script/blob/master/jdjf_price.js
+#          https://github.com/Tartarus2014/Script/blob/master/jf_Convert.js
+name: 京东京粉转链
+description: 京东商品一键转京粉返利链接 0.1
+author: Tartarus2014
+homepage: https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
+env_schema:
+  JF_CONVERT:
+    name: "京粉转链"
+    description: "打开商品自动转京粉返利链接，点通知一键跳转"
+    default_value: "true"
+    options:
+      - "true"
+      - "false"
+  JF_PRICE:
+    name: "历史比价"
+    description: "通知里附带历史最低价"
+    default_value: "true"
+    options:
+      - "true"
+      - "false"
+  JD_COOKIE:
+    name: "京粉 Cookie"
+    description: "留空用京东 App 请求自带的 Cookie；转链失败再填京粉账号的 Cookie"
+    default_value: ""
+scriptings:
+  - http_response:
+      name: 京粉转链
+      match: '^https?://api\.m\.jd\.com/(client\.action|api)\?functionId=(wareBusiness|serverConfig|basicConfig|lite_wareBusiness|pingou_item)'
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=1
+      body_required: true
+      timeout: 30
+      max_size: 2097152
+mitm:
+  hostnames:
+    - api.m.jd.com
