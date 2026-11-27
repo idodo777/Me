@@ -7,20 +7,16 @@
 #   转链失败再填模块参数 JD_COOKIE（青龙 JD_COOKIE 的完整 pt_key 值）
 # 京粉转链：上游作者 Tartarus2014（脚本）/ sempliciy（Surge 模块），上游更新：脚本 2021-11-03；模块 2022-06-08
 # 拦截数量：2（api.m.jd.com、api-dd.jd.com）
-# 脚本数量：2（jd-wskey.js 京东 wskey 同步 + jdjf.js 一键转京粉返利链接，合并上游 jdjf_price.js 与 jf_Convert.js）
+# 脚本数量：2（jd-wskey.js 京东 wskey 同步 + jdjf.js 一键转京粉返利链接，取上游 jf_Convert.js 的转链部分）
 # 上游来源：https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
-# 脚本来源：https://github.com/Tartarus2014/Script/blob/master/jdjf_price.js
-#          https://github.com/Tartarus2014/Script/blob/master/jf_Convert.js
+# 脚本来源：https://github.com/Tartarus2014/Script/blob/master/jf_Convert.js
 #          https://github.com/githubdulong/Script/blob/master/Surge/JDWSKey.sgmodule
 # 注意：同步服务器地址与口令不在本文件里，由用户在模块设置页填写（CK_SYNC_URL / CK_SYNC_TOKEN）
-# 0.7（2026-11-27 上游全量复核）：上游 BoxJS 里 Cookie 是手填的完整 CK（jfCookie，优先于 CookieJD/CookieJD2/CookiesJD），
-#   通知是“京东价格/返利”，点通知按 openjd://virtual?params=… 跳转；上游先放行响应、后台再通知，
-#   Egern 做不到先放行，本版改为双路并行各 4 秒硬超时、失败也弹通知写清原因；慢慢买匿名接口已限流
-#   （ok=0 code 7700“需登录验证”，单次 6 秒以上），历史价查不到是常态、超时即放弃不阻塞转链
+# 0.8（2026-11-27 用户令）：历史价格相关全部去掉，只留返利转链 + 捕获 CK 上传 wskey
 name: 京东京粉
 #   7. 跨请求自己凑齐（2026-11-27 用户令）：wskey 和 pin 不必出现在同一次请求里，
 #      各自抓到就分别存起来，两边齐了自动拼成 pin=...;wskey=...; 上传
-description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.7
+description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.8
 author: Tartarus2014
 homepage: https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 env_schema:
@@ -46,13 +42,6 @@ env_schema:
     options:
       - "true"
       - "false"
-  JF_PRICE:
-    name: "历史比价"
-    description: "通知里附带历史最低价"
-    default_value: "true"
-    options:
-      - "true"
-      - "false"
   JD_COOKIE:
     name: "京粉 Cookie"
     description: "留空用京东 App 请求自带的 Cookie；转链失败再填京粉账号的 Cookie"
@@ -61,7 +50,7 @@ scriptings:
   - http_response:
       name: 京粉转链
       match: '^https?://api\.m\.jd\.com/(client\.action|api)\?functionId=(wareBusiness|serverConfig|basicConfig|lite_wareBusiness|pingou_item)'
-      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=3
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=4
       body_required: true
       timeout: 30
       max_size: 2097152
