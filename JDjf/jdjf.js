@@ -1,4 +1,4 @@
-// 京东京粉转链（Egern 版）
+// 京东京粉转链（Egern 版）0.7
 // 上游作者：Tartarus2014（脚本）/ sempliciy（Surge 模块）
 // 上游更新：脚本 2021-11-03；模块 2022-06-08
 // 拦截数量：1（api.m.jd.com）
@@ -6,10 +6,15 @@
 // 上游来源：https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 // 脚本来源：https://github.com/Tartarus2014/Script/blob/master/jdjf_price.js
 //          https://github.com/Tartarus2014/Script/blob/master/jf_Convert.js
-// 用法：打开京东商品详情，脚本自动查历史最低价并转京粉返利链接，
-//      弹一条通知，点通知一键跳转到返利后的商品页。
+// 用法：打开京东商品详情，弹一条通知（历史最低价 + 返利），点通知一键跳转到返利后的商品页。
 // Cookie：默认用京东 App 本次请求的 Cookie；转链失败时在模块参数里填京粉账号的 JD_COOKIE。
 // 注意：转链只对已开通京东联盟（京粉）的账号生效；未开通会提示“暂无返利信息”。
+// 0.7 改动（2026-11-27 上游全量复核后重写）：
+//   ① 上游是“先放行、后台再通知”，Egern 做不到先放行——本版改为双路并行 + 各 4 秒硬超时，
+//      任何一路挂住都拖不死通知，打开商品必有一条通知（成功/失败原因都写进通知里，杜绝静默）；
+//   ② 历史价源头慢慢买已限流：匿名查返回 ok=0 code 7700“需登录验证”，且单次 6 秒以上，
+//      本版超时即放弃、不阻塞转链，通知里只写一行“历史价暂不可用”；
+//   ③ 转链 URL 参数改回上游同款 encodeURI；失败时通知里写清 code，不再静默返回空。
 
 export default async function (ctx) {
   try {
@@ -56,14 +61,15 @@ export default async function (ctx) {
     const autoScheme = isHealth ? "openApp.jdHealth" : "openjd";
     const cookie = getCookie(ctx);
 
+    // 双路并行，各 4 秒硬超时：任何一路挂住都不拖死通知
     const [historyMsg, conv] = await Promise.all([
-      usePrice ? historyPrice(shareUrl) : Promise.resolve(""),
-      useConvert ? convert(shareUrl, cookie, autoScheme, false) : Promise.resolve(""),
+      usePrice ? withTimeout(historyPrice(ctx, shareUrl), 4000, "") : Promise.resolve(""),
+      useConvert ? withTimeout(convert(ctx, shareUrl, cookie, autoScheme, false), 4000, "TIMEOUT") : Promise.resolve(""),
     ]);
 
     let finalConv = conv;
     if (finalConv === "useJXOrigin" && isPingou) {
-      finalConv = await convert(shareUrl, cookie, autoScheme, true);
+      finalConv = await withTimeout(convert(ctx, shareUrl, cookie, autoScheme, true), 4000, "TIMEOUT");
     }
 
     const parts = [];
@@ -75,7 +81,8 @@ export default async function (ctx) {
     } else if (typeof finalConv === "string" && finalConv) {
       parts.push(finalConv);
     }
-    const msg = parts.length ? parts.join("\n") : "该商品暂无返利信息";
+    // 两路都空：也弹一条，写清原因，杜绝“打开商品什么都没有”
+    const msg = parts.length ? parts.join("\n") : "该商品暂无返利信息（历史价与转链都没返回）";
 
     if (openUrl) {
       ctx.notify({ title: "京东京粉转链", body: msg, action: { type: "openUrl", url: openUrl } });
@@ -86,6 +93,14 @@ export default async function (ctx) {
   } catch (e) {
     // 失败放行，不影响商品页
   }
+}
+
+// 任意 promise 超时即返回 fallback，不抛错
+function withTimeout(p, ms, fallback) {
+  return Promise.race([
+    p,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), ms)),
+  ]);
 }
 
 function getCookie(ctx) {
@@ -102,8 +117,10 @@ function getCookie(ctx) {
 }
 
 // ---------- 历史比价（慢慢买） ----------
+// 注意：慢慢买匿名接口现已限流（ok=0 code 7700“需登录验证”），查不到价是常态，
+// 本函数只做 best-effort：超时/限流都返回空或一行提示，绝不阻塞转链。
 
-async function historyPrice(shareUrl) {
+async function historyPrice(ctx, shareUrl) {
   try {
     const resp = await ctx.http.post(
       "https://apapia-history.manmanbuy.com/ChromeWidgetServices/WidgetServices.ashx",
@@ -122,7 +139,7 @@ async function historyPrice(shareUrl) {
       const detail = priceSummary(data);
       return (lower + "\n" + detail).replace(/^\n+/, "").trim();
     }
-    if (data.ok == 0 && data.msg) return `😳 ${data.msg}`;
+    if (data.ok == 0) return "〽️ 历史价暂不可用（慢慢买需登录验证）";
     return "";
   } catch (e) {
     return "";
@@ -258,8 +275,8 @@ function dateFormat(cellval) {
 
 // ---------- 京粉转链 ----------
 
-async function convert(url, cookie, autoScheme, isOriginJXURL) {
-  if (!cookie) return "";
+async function convert(ctx, url, cookie, autoScheme, isOriginJXURL) {
+  if (!cookie) return "转链无 Cookie：请在模块参数 JD_COOKIE 里填京粉账号的 Cookie";
   let id;
   if (url.includes("item.m.jd") || url.includes("item.jd")) {
     const m = url.match(/(\d+)\.html/);
@@ -289,9 +306,10 @@ async function convert(url, cookie, autoScheme, isOriginJXURL) {
     },
   };
   const t = Date.now();
+  // 上游同款 encodeURI（不用 encodeURIComponent），其余参数与上游逐字一致
   const apiUrl =
     `https://api.m.jd.com/api?functionId=ConvertSuperLink&appid=u&_=${t}&body=` +
-    encodeURIComponent(JSON.stringify(body)) +
+    encodeURI(JSON.stringify(body)) +
     `&loginType=2`;
 
   let resp;
@@ -306,14 +324,14 @@ async function convert(url, cookie, autoScheme, isOriginJXURL) {
       },
     });
   } catch (e) {
-    return "";
+    return "转链请求失败（网络不通或被拦截）";
   }
 
   let data;
   try {
     data = JSON.parse(await resp.text());
   } catch (e) {
-    return "";
+    return "转链返回异常（接口被墙/403）";
   }
 
   const d = data.data || {};
@@ -340,7 +358,7 @@ async function convert(url, cookie, autoScheme, isOriginJXURL) {
   } else if (data.code === 430) {
     return "账号未开通京粉，转链不可用";
   } else {
-    return "";
+    return `转链失败（code ${data.code}）`;
   }
 }
 
