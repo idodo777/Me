@@ -6,17 +6,24 @@
 #   本模块 wskey 走实时请求 Cookie（HAR 证实 11/20 个首页请求都带 wskey），转链 Cookie 默认同理，
 #   转链失败再填模块参数 JD_COOKIE（青龙 JD_COOKIE 的完整 pt_key 值）
 # 京粉转链：上游作者 Tartarus2014（脚本）/ sempliciy（Surge 模块），上游更新：脚本 2021-11-03；模块 2022-06-08
-# 拦截数量：2（api.m.jd.com、api-dd.jd.com）
-# 脚本数量：2（jd-wskey.js 京东 wskey 同步 + jdjf.js 一键转京粉返利链接，取上游 jf_Convert.js 的转链部分）
+# 拦截数量：3（api.m.jd.com、api-dd.jd.com、union.jd.com）
+# 脚本数量：3（jdjf.js wskey 捕获 + 一键转京粉返利链接；jd-wskey.js 备用只盯 api-dd；jd-union.js 京粉 CK 捕获）
 # 上游来源：https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 # 脚本来源：https://github.com/Tartarus2014/Script/blob/master/jf_Convert.js
 #          https://github.com/githubdulong/Script/blob/master/Surge/JDWSKey.sgmodule
+#          https://github.com/x-dr/ntchat_code/blob/main/api/jd.py（unionId 写法）
 # 注意：同步服务器地址与口令不在本文件里，由用户在模块设置页填写（CK_SYNC_URL / CK_SYNC_TOKEN）
-# 0.8（2026-11-27 用户令）：历史价格相关全部去掉，只留返利转链 + 捕获 CK 上传 wskey
+# 0.9（2026-11-27 用户令 + 0.8 零通知返修）：
+#   ① 加 JD_UNION_ID 参数（京粉 App → 我的 → 昵称下方的数字），转链 body 顶层带 unionId；
+#      上游 Tartarus 的脚本不传 unionId，ntchat 的可用实现传了，本版照后者加，无 ID 时不传；
+#   ② 加京粉 CK 捕获：jd-union.js 盯 union.jd.com，jdjf.js 在联盟接口请求里也顺手抓；
+#      上游没有现成的捕获脚本（jfCookie / lkJdHelperCk 都是 BoxJS 手填），这是新加的；
+#   ③ 0.8 转链零通知返修：match 改 host 级（functionId 在脚本内判断），
+#      wskey 捕获与转链合并为单脚本、body 只读一次；jd-wskey.js 只留 api-dd 一路。
 name: 京东京粉
 #   7. 跨请求自己凑齐（2026-11-27 用户令）：wskey 和 pin 不必出现在同一次请求里，
 #      各自抓到就分别存起来，两边齐了自动拼成 pin=...;wskey=...; 上传
-description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.8
+description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.9
 author: Tartarus2014
 homepage: https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 env_schema:
@@ -42,24 +49,33 @@ env_schema:
     options:
       - "true"
       - "false"
+  JD_UNION_ID:
+    name: "京粉联盟 ID"
+    description: "京粉 App → 我的 → 昵称下方的数字；填了转链按你的联盟账号出返利链接"
+    default_value: ""
   JD_COOKIE:
     name: "京粉 Cookie"
     description: "留空用京东 App 请求自带的 Cookie；转链失败再填京粉账号的 Cookie"
     default_value: ""
 scriptings:
   - http_response:
-      name: 京粉转链
-      match: '^https?://api\.m\.jd\.com/(client\.action|api)\?functionId=(wareBusiness|serverConfig|basicConfig|lite_wareBusiness|pingou_item)'
-      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=4
+      name: 京粉全功能
+      match: '^https?://api\.m\.jd\.com/'
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=5
       body_required: true
       timeout: 30
-      max_size: 2097152
+      max_size: 8388608
   - http_response:
       name: 京东 wskey 同步
-      match: '^https://(api\.m\.jd\.com|api-dd\.jd\.com)/'
+      match: '^https://api-dd\.jd\.com/'
       script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-wskey.js?v=4
       body_required: true
+  - http_request:
+      name: 京粉 CK 捕获
+      match: '^https?://union\.jd\.com/'
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-union.js?v=1
 mitm:
   hostnames:
     - api.m.jd.com
     - api-dd.jd.com
+    - union.jd.com
