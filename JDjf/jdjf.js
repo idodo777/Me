@@ -1,4 +1,4 @@
-// 京东京粉全功能（Egern 版）0.9
+// 京东京粉全功能（Egern 版）1.0 诊断版
 // 上游作者：Tartarus2014（脚本）/ sempliciy（Surge 模块）；unionId 写法参照 x-dr/ntchat_code api/jd.py
 // 上游更新：脚本 2021-11-03；模块 2022-06-08
 // 拦截数量：3（api.m.jd.com、api-dd.jd.com、union.jd.com）
@@ -20,6 +20,9 @@
 //      上游没有现成的捕获脚本（BoxJS 的 jfCookie / lkJdHelperCk 都是手填），这是新加的；
 //   ③ 0.8 转链零通知返修：match 改 host 级（functionId 在脚本内判断），
 //      wskey 捕获与转链合并为单脚本、body 只读一次。
+
+// 1.0 诊断版（2026-11-27 21:19 用户实测报“商品响应解析失败”）：解析失败时通知里带上
+//   状态码、响应体长度、functionId 与前 60 字，先看清响应到底是什么再修；其余逻辑与 0.9 相同。
 
 export default async function (ctx) {
   const url = String((ctx.request && ctx.request.url) || "");
@@ -56,7 +59,22 @@ export default async function (ctx) {
   try {
     obj = JSON.parse(bodyText);
   } catch (e) {
-    ctx.notify({ title: "京东京粉转链", body: "商品响应解析失败（响应体为空或不是 JSON）" });
+    // 诊断版：报清状态码、长度、functionId 与响应头 60 字，定位到底是空响应、验证页还是编码问题
+    let st = "?";
+    try {
+      st = String(ctx.response && ctx.response.status);
+    } catch (e2) {}
+    let fid = "?";
+    try {
+      const fm = url.match(/functionId=([^&]+)/);
+      if (fm) fid = fm[1];
+    } catch (e2) {}
+    const len = bodyText ? bodyText.length : 0;
+    const head = bodyText ? bodyText.replace(/[\r\n\t]+/g, " ").slice(0, 60) : "";
+    ctx.notify({
+      title: "京东京粉转链",
+      body: `解析失败：status=${st} 长度=${len} ${fid}「${head || "（空）"}」`,
+    });
     return;
   }
 

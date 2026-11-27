@@ -23,7 +23,8 @@
 name: 京东京粉
 #   7. 跨请求自己凑齐（2026-11-27 用户令）：wskey 和 pin 不必出现在同一次请求里，
 #      各自抓到就分别存起来，两边齐了自动拼成 pin=...;wskey=...; 上传
-description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.9
+# 1.0 诊断版（2026-11-27 21:19 用户实测）：商品响应解析失败时通知带状态码、长度、functionId 与前 60 字，先定位再修；其余与 0.9 相同。
+description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 1.0
 author: Tartarus2014
 homepage: https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 env_schema:
@@ -61,7 +62,7 @@ scriptings:
   - http_response:
       name: 京粉全功能
       match: '^https?://api\.m\.jd\.com/'
-      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=5
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=6
       body_required: true
       timeout: 30
       max_size: 8388608
