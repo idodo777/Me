@@ -14,6 +14,9 @@
 //      "pin":"xxx" / $pin=xxx），取不到先存 wskey 待匹配。
 //   6. 提醒节流：wskey 没变 / 没抓到 / 只有 wskey 没 pin 时，每小时最多提醒一次，
 //      避免每个请求都弹。上传成功/失败每次都提醒（只在 wskey 变化时才上传）。
+//   7. 跨请求自己凑齐（2026-11-27 用户令）：wskey 和 pin 不必出现在同一次请求里，
+//      各自抓到就分别存起来（jd_wskey_piece / jd_pin_piece），两边齐了就自动
+//      拼成 pin=...;wskey=...; 上传；wskey 轮换时新值覆盖旧值，pin 不变一直复用。
 // 触发: 打开京东 App 即抓（首页请求就带 wskey）；wskey 没变不重复传。
 // 注意: 同步服务器地址与口令不在本文件里，由用户在模块设置页填写（CK_SYNC_URL / CK_SYNC_TOKEN）。
 export default async function (ctx) {
@@ -34,14 +37,28 @@ export default async function (ctx) {
       return false;
     }
   }
+  function loadPiece(key) {
+    try {
+      return ctx.storage.get(key) || "";
+    } catch (e) {
+      return "";
+    }
+  }
+  function savePiece(key, val) {
+    try {
+      ctx.storage.set(key, val);
+    } catch (e) {}
+  }
 
+  // ---- 本次请求里能拿到什么 ----
   let cookie = "";
   try {
     cookie = ctx.request.headers.get("cookie") || ctx.request.headers.get("Cookie") || "";
   } catch (e) {}
 
+  let wskey = "";
   const wskeyMatch = cookie.match(/wskey=([^;]+)/);
-  const wskey = wskeyMatch ? wskeyMatch[1] : "";
+  if (wskeyMatch) wskey = wskeyMatch[1];
 
   let pin = "";
   let bodyText = "";
@@ -94,76 +111,84 @@ export default async function (ctx) {
     }
   }
 
-  if (!wskey) {
-    if (!throttled("miss")) {
-      ctx.notify({ title: "京东 wskey 未抓到", body: "本次请求里没有 wskey，确认已登录京东" });
-    }
-    return {};
-  }
+  // ---- 跨请求凑齐：各存各的 ----
+  let savedWskey = loadPiece("jd_wskey_piece") || loadPiece("jd_wskey_pending") || "";
+  let savedPin = loadPiece("jd_pin_piece") || "";
+  if (wskey) savedWskey = wskey;
+  if (pin) savedPin = pin;
+  if (wskey) savePiece("jd_wskey_piece", savedWskey);
+  if (pin) savePiece("jd_pin_piece", savedPin);
 
-  if (!pin) {
-    // wskey 抓到了但 pin 不明：先存起来，等有 pin 的请求再补
+  // ---- 齐了就上传 ----
+  if (savedWskey && savedPin) {
+    const value = "pin=" + savedPin + ";wskey=" + savedWskey + ";";
+    const storeKey = "jd_wskey_" + savedPin;
+    let old = null;
     try {
-      const oldPending = ctx.storage.get("jd_wskey_pending") || "";
-      if (oldPending !== wskey) {
-        ctx.storage.set("jd_wskey_pending", wskey);
-        if (!throttled("nopin")) {
-          ctx.notify({ title: "京东 wskey 已抓取", body: "wskey 已抓到，正在等带 pin 的请求来匹配账号" });
-        }
-      }
+      old = ctx.storage.get(storeKey);
     } catch (e) {}
-    return {};
-  }
-
-  const value = "pin=" + pin + ";wskey=" + wskey + ";";
-  const storeKey = "jd_wskey_" + pin;
-  let old = null;
-  try {
-    old = ctx.storage.get(storeKey);
-  } catch (e) {}
-  if (old === value) {
-    if (!throttled("same")) {
-      ctx.notify({ title: "京东 wskey 已是最新", body: "账号 " + pin + " 的 wskey 未变，无需同步" });
+    if (old === value) {
+      if (!throttled("same")) {
+        ctx.notify({ title: "京东 wskey 已是最新", body: "账号 " + savedPin + " 的 wskey 未变，无需同步" });
+      }
+      return {};
     }
-    return {};
-  }
-  try {
-    ctx.storage.set(storeKey, value);
-  } catch (e) {}
+    try {
+      ctx.storage.set(storeKey, value);
+    } catch (e) {}
 
-  if (!SYNC_URL) {
-    ctx.notify({ title: "京东 wskey 已抓取", body: "未填同步服务器地址，请在模块设置里填 CK_SYNC_URL" });
-    return {};
-  }
+    if (!SYNC_URL) {
+      ctx.notify({ title: "京东 wskey 已抓取", body: "未填同步服务器地址，请在模块设置里填 CK_SYNC_URL" });
+      return {};
+    }
 
-  if (!TOKEN) {
-    ctx.notify({ title: "京东 wskey 已抓取", body: "未填同步口令，请在模块设置里填 CK_SYNC_TOKEN" });
-    return {};
-  }
+    if (!TOKEN) {
+      ctx.notify({ title: "京东 wskey 已抓取", body: "未填同步口令，请在模块设置里填 CK_SYNC_TOKEN" });
+      return {};
+    }
 
-  try {
-    const res = await ctx.http.post(SYNC_URL + "/jd-wskey", {
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: TOKEN, pin: pin, wskey: wskey }),
-    });
-    const data = JSON.parse(await res.text());
-    if (data && data.ok) {
-      ctx.notify({
-        title: "京东 wskey 已同步",
-        body:
-          "账号 " +
-          pin +
-          " 已写入青龙" +
-          (data.convert_triggered ? "，正在转换" : "（转换任务触发失败，请看青龙任务 413）"),
+    try {
+      const res = await ctx.http.post(SYNC_URL + "/jd-wskey", {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: TOKEN, pin: savedPin, wskey: savedWskey }),
       });
-    } else {
-      ctx.notify({ title: "京东 wskey 同步失败", body: (data && data.error) || "服务器返回异常" });
+      const data = JSON.parse(await res.text());
+      if (data && data.ok) {
+        ctx.notify({
+          title: "京东 wskey 已同步",
+          body:
+            "账号 " +
+            savedPin +
+            " 已写入青龙" +
+            (data.convert_triggered ? "，正在转换" : "（转换任务触发失败，请看青龙任务 413）"),
+        });
+      } else {
+        ctx.notify({ title: "京东 wskey 同步失败", body: (data && data.error) || "服务器返回异常" });
+      }
+    } catch (e) {
+      ctx.notify({
+        title: "京东 wskey 同步失败",
+        body: "连不上服务器：" + (e && e.message ? e.message : String(e)),
+      });
     }
-  } catch (e) {
-    ctx.notify({
-      title: "京东 wskey 同步失败",
-      body: "连不上服务器：" + (e && e.message ? e.message : String(e)),
-    });
+    return {};
+  }
+
+  // ---- 还没齐：报一半的进度（节流 1 小时） ----
+  if (savedWskey && !savedPin) {
+    if (!throttled("half_wskey")) {
+      ctx.notify({ title: "京东 wskey 已抓取", body: "wskey 已抓到，正在等带 pin 的请求来凑齐账号" });
+    }
+    return {};
+  }
+  if (!savedWskey && savedPin) {
+    if (!throttled("half_pin")) {
+      ctx.notify({ title: "京东 wskey 未抓到", body: "已取到账号 " + savedPin + "，正在等带 wskey 的请求" });
+    }
+    return {};
+  }
+  if (!throttled("miss")) {
+    ctx.notify({ title: "京东 wskey 未抓到", body: "本次请求里没有 wskey，确认已登录京东" });
   }
   return {};
 }
