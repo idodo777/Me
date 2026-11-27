@@ -5,6 +5,7 @@
 //   2. 上传目标由 Telegram Bot 改为自家服务器接收器（POST /jd-wskey），
 //      服务器收到后自动写青龙 JD_WSCK 并触发 wskey 转换；
 //   3. pin 优先取响应体 userInfoSns.pin，取不到再用 unickName（上游原法）。
+//   4. 每次触发都有通知：抓到/未变/未抓到/同步成功/同步失败，绝不静默。
 //      响应里没有 pt_pin（App Cookie 只有 wskey），pin 只能从响应体拿。
 // 触发: 打开京东 App / 个人中心下拉刷新时，newUserInfo 请求即抓取；wskey 没变不重复传。
 // 注意: 同步服务器地址与口令不在本文件里，由用户在模块设置页填写（CK_SYNC_URL / CK_SYNC_TOKEN）。
@@ -33,6 +34,7 @@ export default async function (ctx) {
   } catch (e) {}
 
   if (!pin || !wskey) {
+    ctx.notify({ title: "京东 wskey 未抓到", body: "本次请求里没有 wskey，确认已登录京东并打开个人中心下拉刷新" });
     return {};
   }
 
@@ -41,6 +43,7 @@ export default async function (ctx) {
   let old = null;
   try { old = ctx.storage.get(storeKey); } catch (e) {}
   if (old === value) {
+    ctx.notify({ title: "京东 wskey 已是最新", body: "账号 " + pin + " 的 wskey 未变，无需同步" });
     return {};
   }
   try { ctx.storage.set(storeKey, value); } catch (e) {}

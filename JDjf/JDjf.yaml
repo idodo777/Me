@@ -9,7 +9,7 @@
 #          https://github.com/githubdulong/Script/blob/master/Surge/JDWSKey.sgmodule
 # 注意：同步服务器地址与口令不在本文件里，由用户在模块设置页填写（CK_SYNC_URL / CK_SYNC_TOKEN）
 name: 京东京粉
-description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.2
+description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.3
 author: Tartarus2014
 homepage: https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 env_schema:
@@ -50,7 +50,7 @@ scriptings:
   - http_response:
       name: 京东 wskey 同步
       match: '^https://api\.m\.jd\.com/client\.action\?functionId=newUserInfo'
-      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-wskey.js?v=1
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-wskey.js?v=2
       body_required: true
   - http_response:
       name: 京粉转链
