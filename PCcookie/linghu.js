@@ -1,3 +1,4 @@
+// 【改版 2026-11-27】抓到 CK 即上传青龙接收器（POST /ck，全部上传）；原版只存手机本地。
 // linghu · Cookie 抓取（Egern 移植版）
 // 原作: MaYIHEI
 // 上游来源: https://raw.githubusercontent.com/MaYIHEI/paperclip/refs/heads/main/app/linghu/linghu.js
@@ -54,9 +55,28 @@ export default async function (ctx) {
     })();
   };
   globalThis.$httpClient = { get: __mk("GET"), post: __mk("POST"), put: __mk("PUT"), delete: __mk("DELETE"), head: __mk("HEAD"), options: __mk("OPTIONS"), patch: __mk("PATCH") };
+  // ---------- CK 同步改版：抓到即上传青龙接收器（只留改版，原版无此段） ----------
+  const __CK_APP = "linghu";
+  const __CK_SYNC_URL = (ctx.env && ctx.env.CK_SYNC_URL ? String(ctx.env.CK_SYNC_URL) : "").replace(/\/+$/, "");
+  const __CK_TOKEN = (ctx.env && ctx.env.CK_SYNC_TOKEN) ? String(ctx.env.CK_SYNC_TOKEN) : "";
+  function __ckUpload(v, k) {
+    try {
+      if (!__CK_SYNC_URL || !__CK_TOKEN) return;
+      const __val = v == null ? "" : String(v);
+      if (__val.length < 16) return;
+      const __key = String(k || "");
+      const __kl = __key.toLowerCase();
+      if (__kl.indexOf("status") !== -1 || __kl.indexOf("registry") !== -1 || __kl.indexOf("checkin") !== -1) return;
+      let __old = null;
+      try { __old = ctx.storage.get("__ck_sent_" + __key); } catch (e) {}
+      if (__old === __val) return;
+      try { ctx.storage.set("__ck_sent_" + __key, __val); } catch (e) {}
+      ctx.http.post(__CK_SYNC_URL + "/ck", { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: __CK_TOKEN, app: __CK_APP, key: __key, value: __val }) }).catch(function () {});
+    } catch (e) {}
+  }
   globalThis.$persistentStore = {
     read: (k) => { try { const v = ctx.storage.get(k); return v == null ? null : v; } catch (e) { return null; } },
-    write: (v, k) => { try { ctx.storage.set(k, v == null ? "" : String(v)); return true; } catch (e) { return false; } },
+    write: (v, k) => { let __ok = false; try { ctx.storage.set(k, v == null ? "" : String(v)); __ok = true; } catch (e) { __ok = false; } try { __ckUpload(v, k); } catch (e) {} return __ok; },
   };
   globalThis.$notification = { post: (t, s, b) => { try { ctx.notify({ title: t == null ? "" : String(t), subtitle: s ? String(s) : undefined, body: b == null ? "" : String(b) }); } catch (e) {} } };
   globalThis.$environment = { "surge-version": "5.20.0" };
