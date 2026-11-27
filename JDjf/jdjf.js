@@ -46,7 +46,10 @@ export default async function (ctx) {
     } catch (e) {
       shareUrl = "";
     }
-    if (!shareUrl) return;
+    if (!shareUrl) {
+      ctx.notify({ title: "京东京粉转链", body: "没取到商品链接，商品页结构可能变了" });
+      return;
+    }
 
     const isPingou = url.includes("pingou_item");
     const isHealth = url.includes("wareBusiness.style");

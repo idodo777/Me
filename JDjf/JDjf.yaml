@@ -1,7 +1,7 @@
 # 京东京粉（Egern 版）
 # 京东 wskey 同步：参照 githubdulong/Script JDWSKey.js 改写，抓到即 POST 到服务器，自动写青龙 JD_WSCK 并触发转换
 # 京粉转链：上游作者 Tartarus2014（脚本）/ sempliciy（Surge 模块），上游更新：脚本 2021-11-03；模块 2022-06-08
-# 拦截数量：1（api.m.jd.com）
+# 拦截数量：2（api.m.jd.com、api-dd.jd.com）
 # 脚本数量：2（jd-wskey.js 京东 wskey 同步 + jdjf.js 一键转京粉返利链接，合并上游 jdjf_price.js 与 jf_Convert.js）
 # 上游来源：https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 # 脚本来源：https://github.com/Tartarus2014/Script/blob/master/jdjf_price.js
@@ -9,7 +9,7 @@
 #          https://github.com/githubdulong/Script/blob/master/Surge/JDWSKey.sgmodule
 # 注意：同步服务器地址与口令不在本文件里，由用户在模块设置页填写（CK_SYNC_URL / CK_SYNC_TOKEN）
 name: 京东京粉
-description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.3
+description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 0.4
 author: Tartarus2014
 homepage: https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 env_schema:
@@ -49,16 +49,17 @@ env_schema:
 scriptings:
   - http_response:
       name: 京东 wskey 同步
-      match: '^https://api\.m\.jd\.com/client\.action\?functionId=newUserInfo'
+      match: '^https://(api\.m\.jd\.com|api-dd\.jd\.com)/(client\.action|api)\?functionId=newUserInfo'
       script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-wskey.js?v=2
       body_required: true
   - http_response:
       name: 京粉转链
       match: '^https?://api\.m\.jd\.com/(client\.action|api)\?functionId=(wareBusiness|serverConfig|basicConfig|lite_wareBusiness|pingou_item)'
-      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=1
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jdjf.js?v=2
       body_required: true
       timeout: 30
       max_size: 2097152
 mitm:
   hostnames:
     - api.m.jd.com
+    - api-dd.jd.com
