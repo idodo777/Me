@@ -1,4 +1,4 @@
-// 京东京粉全功能（Egern 版）1.0 诊断版
+// 京东京粉全功能（Egern 版）1.1
 // 上游作者：Tartarus2014（脚本）/ sempliciy（Surge 模块）；unionId 写法参照 x-dr/ntchat_code api/jd.py
 // 上游更新：脚本 2021-11-03；模块 2022-06-08
 // 拦截数量：3（api.m.jd.com、api-dd.jd.com、union.jd.com）
@@ -9,7 +9,7 @@
 //          https://github.com/x-dr/ntchat_code/blob/main/api/jd.py（unionId 写法）
 // 用法：打开京东商品详情，弹一条返利通知，点通知一键跳转到返利后的商品页；
 //   打开京东 App 即抓 wskey，自动同步到青龙；打开京东联盟（京粉 App / union.jd.com）即抓京粉 CK 供转链用。
-// Cookie：转链优先用模块参数 JD_COOKIE，其次已捕获的京粉 CK，再用本次请求的 Cookie，最后用已捕获的 wskey 拼。
+// Cookie：转链只用存好的完整 Cookie（模块参数 JD_COOKIE 或已捕获的京粉 CK），从不用请求里的 wskey。
 // 联盟 ID：京粉 App → 我的 → 昵称下方的数字，填进模块参数 JD_UNION_ID；
 //   上游 Tartarus 的脚本不传 unionId（靠服务器从 Cookie 反查账号），
 //   ntchat 的可用实现是在 body 顶层传 unionId，本版照此加，无 ID 时不传。
@@ -21,8 +21,13 @@
 //   ③ 0.8 转链零通知返修：match 改 host 级（functionId 在脚本内判断），
 //      wskey 捕获与转链合并为单脚本、body 只读一次。
 
-// 1.0 诊断版（2026-11-27 21:19 用户实测报“商品响应解析失败”）：解析失败时通知里带上
-//   状态码、响应体长度、functionId 与前 60 字，先看清响应到底是什么再修；其余逻辑与 0.9 相同。
+// 1.1（2026-11-27 21:39 用户令查上游后返修）：
+//   ① 匹配改上游原样：只认 functionId 精确等于 wareBusiness / lite_wareBusiness /
+//      wareBusiness.style / pingou_item；0.9 的 url.includes("wareBusiness") 子串匹配会误触
+//      别的接口，响应不是商品详情 JSON 就报“解析失败”——21:19 两条就是这么来的；
+//   ② 转链 Cookie 改上游原样：只用存好的完整 Cookie（模块参数 JD_COOKIE 或已捕获的京粉 CK），
+//      不再拿请求里的 wskey 去撞（ConvertSuperLink 不认 wskey）；没有就明说请填 JD_COOKIE；
+//   ③ 解析失败诊断再加 Content-Encoding，看是不是 Brotli 编码导致读不到正文。
 
 export default async function (ctx) {
   const url = String((ctx.request && ctx.request.url) || "");
@@ -50,8 +55,17 @@ export default async function (ctx) {
     saveUnionCookie(ctx, cookie);
   }
 
-  // ③ 商品页才转链
-  const isWare = url.includes("wareBusiness") || url.includes("pingou_item");
+  // ③ 商品页才转链（上游写法：只认 functionId 精确等于 wareBusiness / lite_wareBusiness /
+  //    wareBusiness.style / pingou_item；子串匹配会误触别的接口——0.9 两条“解析失败”就是这么来的）
+  let rawFid = "";
+  try {
+    const fm = url.match(/[?&]functionId=([^&]+)/);
+    if (fm) rawFid = decodeURIComponent(fm[1]);
+  } catch (e2) {}
+  const isPingou = rawFid === "pingou_item";
+  const isHealth = rawFid === "wareBusiness.style";
+  const isWare =
+    rawFid === "wareBusiness" || rawFid === "lite_wareBusiness" || isPingou || isHealth;
   if (!isWare) return;
   if ((ctx.env.JF_CONVERT ?? "true") === "false") return;
 
@@ -59,21 +73,23 @@ export default async function (ctx) {
   try {
     obj = JSON.parse(bodyText);
   } catch (e) {
-    // 诊断版：报清状态码、长度、functionId 与响应头 60 字，定位到底是空响应、验证页还是编码问题
+    // 诊断：报清状态码、编码、长度、functionId 与响应头 60 字，定位到底是空响应、验证页还是编码问题
     let st = "?";
+    let enc = "?";
     try {
       st = String(ctx.response && ctx.response.status);
     } catch (e2) {}
-    let fid = "?";
     try {
-      const fm = url.match(/functionId=([^&]+)/);
-      if (fm) fid = fm[1];
+      const h = ctx.response && ctx.response.headers;
+      if (h && typeof h.get === "function") {
+        enc = h.get("content-encoding") || h.get("Content-Encoding") || "?";
+      }
     } catch (e2) {}
     const len = bodyText ? bodyText.length : 0;
     const head = bodyText ? bodyText.replace(/[\r\n\t]+/g, " ").slice(0, 60) : "";
     ctx.notify({
       title: "京东京粉转链",
-      body: `解析失败：status=${st} 长度=${len} ${fid}「${head || "（空）"}」`,
+      body: `解析失败：${st} ${enc} 长度=${len} ${rawFid || "?"}「${head || "（空）"}」`,
     });
     return;
   }
@@ -84,9 +100,9 @@ export default async function (ctx) {
   const domain = obj.domain || {};
   let shareUrl = "";
   try {
-    if (url.includes("pingou_item")) {
+    if (isPingou) {
       shareUrl = domain.h5Url || "";
-    } else if (url.includes("wareBusiness.style")) {
+    } else if (isHealth) {
       shareUrl = (others.property && others.property.shareUrl) || "";
     } else {
       shareUrl =
@@ -100,10 +116,8 @@ export default async function (ctx) {
     return;
   }
 
-  const isPingou = url.includes("pingou_item");
-  const isHealth = url.includes("wareBusiness.style");
   const autoScheme = isHealth ? "openApp.jdHealth" : "openjd";
-  const convCookie = getConvertCookie(ctx, cookie);
+  const convCookie = getConvertCookie(ctx);
 
   // 转链 4 秒硬超时：挂住也不拖死通知
   let conv = await withTimeout(convert(ctx, shareUrl, convCookie, autoScheme, false), 4000, "TIMEOUT");
@@ -310,9 +324,12 @@ function saveUnionCookie(ctx, cookie) {
   } catch (e) {}
 }
 
-// ---------- 转链 Cookie 优先级 ----------
+// ---------- 转链 Cookie 优先级（上游写法：只用 BoxJS 里存好的完整 Cookie，从不用请求里带的 Cookie；
+//   京东 App 请求里只有 wskey，ConvertSuperLink 不认 wskey，拿去撞只会 403） ----------
+//   优先级：模块参数 JD_COOKIE（填青龙 JD_COOKIE 的完整值）→ 已捕获的京粉 CK；
+//   都没有就返回 ""，convert() 会明说“请填 JD_COOKIE”，不再拿 wskey 去试。
 
-function getConvertCookie(ctx, requestCookie) {
+function getConvertCookie(ctx) {
   try {
     if (ctx.env.JD_COOKIE && String(ctx.env.JD_COOKIE).trim()) {
       return String(ctx.env.JD_COOKIE).trim();
@@ -322,20 +339,13 @@ function getConvertCookie(ctx, requestCookie) {
     const u = ctx.storage.get("jd_union_cookie") || "";
     if (u) return u;
   } catch (e) {}
-  if (requestCookie) return requestCookie;
-  try {
-    const ws = ctx.storage.get("jd_wskey_piece") || "";
-    const pin = ctx.storage.get("jd_pin_piece") || "";
-    if (ws && pin) return "pin=" + pin + ";wskey=" + ws + ";";
-    if (ws) return "wskey=" + ws + ";";
-  } catch (e) {}
   return "";
 }
 
 // ---------- 京粉转链 ----------
 
 async function convert(ctx, url, cookie, autoScheme, isOriginJXURL) {
-  if (!cookie) return "转链无 Cookie：请在模块参数 JD_COOKIE 里填京粉账号的 Cookie";
+  if (!cookie) return "转链无完整 Cookie：请把青龙 JD_COOKIE 的值填进模块参数 JD_COOKIE";
   let id;
   if (url.includes("item.m.jd") || url.includes("item.jd")) {
     const m = url.match(/(\d+)\.html/);
