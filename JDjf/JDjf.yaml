@@ -6,8 +6,8 @@
 #   本模块 wskey 走实时请求 Cookie（HAR 证实 11/20 个首页请求都带 wskey），转链 Cookie 默认同理，
 #   转链失败再填模块参数 JD_COOKIE（青龙 JD_COOKIE 的完整 pt_key 值）
 # 京粉转链：上游作者 Tartarus2014（脚本）/ sempliciy（Surge 模块），上游更新：脚本 2021-11-03；模块 2022-06-08
-# 拦截数量：3（api.m.jd.com、api-dd.jd.com、union.jd.com）
-# 脚本数量：3（jdjf.js wskey 捕获 + 一键转京粉返利链接；jd-wskey.js 备用只盯 api-dd；jd-union.js 京粉 CK 捕获）
+# 拦截数量：5（api.m.jd.com、api-dd.jd.com、union.jd.com、item.m.jd.com、ccc-x.jd.com）
+# 脚本数量：4（jdjf.js wskey 捕获 + 一键转京粉返利链接；jd-wskey.js 备用只盯 api-dd；jd-union.js 京粉 CK 捕获；jd-h5.js H5 商品页 + 京粉 H5 点击转链）
 # 上游来源：https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 # 脚本来源：https://github.com/Tartarus2014/Script/blob/master/jf_Convert.js
 #          https://github.com/githubdulong/Script/blob/master/Surge/JDWSKey.sgmodule
@@ -25,7 +25,8 @@ name: 京东京粉
 #      各自抓到就分别存起来，两边齐了自动拼成 pin=...;wskey=...; 上传
 # 1.1（2026-11-27 21:39 用户令查上游后返修）：转链只认 functionId 精确匹配（wareBusiness / lite_wareBusiness / wareBusiness.style / pingou_item），不再子串匹配；转链 Cookie 只用存好的完整 Cookie，不再拿请求里的 wskey 去撞；解析失败诊断再加 Content-Encoding。
 # 1.2（2026-11-28 用户令）：加 JDUNION 开关管京粉 CK 捕获（jd-union.js + jdjf.js 顺手抓两路都受它管）；抓到后关掉就不抓也不弹。
-description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 1.2
+# 1.3（2026-11-28 用户令加 H5）：京东 16.1.90 商品详情不再走原生 wareBusiness，京粉 H5 页点商品只发 ccc-x/dsp/nc 追踪（ext=base64 的商品链接）；新加 jd-h5.js：拦 item.m.jd.com 商品页直链 + ccc-x/dsp/nc（解 ext 取商品链接）再转链，同一商品 30 秒内只转一次。
+description: 京东 wskey 同步青龙 · 商品一键转京粉返利链接 1.3
 author: Tartarus2014
 homepage: https://github.com/sempliciy/Quantumult-X/blob/master/Surge/JD_Pirce.sgmodule
 env_schema:
@@ -83,8 +84,18 @@ scriptings:
       name: 京粉 CK 捕获
       match: '^https?://union\.jd\.com/'
       script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-union.js?v=2
+  - http_request:
+      name: H5 商品页转链
+      match: '^https?://item\.m\.jd\.com/product/\d+\.html'
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-h5.js?v=1
+  - http_request:
+      name: 京粉 H5 点击转链
+      match: '^https?://ccc-x\.jd\.com/dsp/nc'
+      script_url: https://raw.githubusercontent.com/idodo777/Me/main/JDjf/jd-h5.js?v=1
 mitm:
   hostnames:
     - api.m.jd.com
     - api-dd.jd.com
     - union.jd.com
+    - item.m.jd.com
+    - ccc-x.jd.com
