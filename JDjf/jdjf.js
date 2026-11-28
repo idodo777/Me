@@ -1,4 +1,4 @@
-// 京东京粉全功能（Egern 版）1.1
+// 京东京粉全功能（Egern 版）1.2
 // 上游作者：Tartarus2014（脚本）/ sempliciy（Surge 模块）；unionId 写法参照 x-dr/ntchat_code api/jd.py
 // 上游更新：脚本 2021-11-03；模块 2022-06-08
 // 拦截数量：3（api.m.jd.com、api-dd.jd.com、union.jd.com）
@@ -28,6 +28,8 @@
 //   ② 转链 Cookie 改上游原样：只用存好的完整 Cookie（模块参数 JD_COOKIE 或已捕获的京粉 CK），
 //      不再拿请求里的 wskey 去撞（ConvertSuperLink 不认 wskey）；没有就明说请填 JD_COOKIE；
 //   ③ 解析失败诊断再加 Content-Encoding，看是不是 Brotli 编码导致读不到正文。
+// 1.2（2026-11-28 用户令）：京粉 CK 捕获加 JDUNION 开关，两路（本文件顺手抓 + jd-union.js）
+//   都受它管；关了就不抓也不弹，抓到后用户手动关。
 
 export default async function (ctx) {
   const url = String((ctx.request && ctx.request.url) || "");
@@ -51,7 +53,8 @@ export default async function (ctx) {
   }
 
   // ② 京粉 CK 捕获：联盟接口请求（京粉 App 的 union / jingfen 接口）顺手抓
-  if (/union|jingfen/i.test(url) && cookie) {
+  //     受 JDUNION 开关管（1.2）：关了就不抓也不弹
+  if ((ctx.env && ctx.env.JDUNION) !== "false" && /union|jingfen/i.test(url) && cookie) {
     saveUnionCookie(ctx, cookie);
   }
 

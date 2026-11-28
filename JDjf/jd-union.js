@@ -4,6 +4,10 @@
 //   抓到新的 Cookie 就存起来给转链用，并弹提醒；已是最新则节流提醒。
 // 注意：京粉 App 自身的接口走 api.m.jd.com，由 jdjf.js 在联盟接口请求里顺手抓，本脚本只补网页版联盟站。
 export default async function (ctx) {
+  // 京粉 CK 捕获开关（JDUNION，1.2）：关了就静默返回，不抓也不弹；默认开，抓到后用户手动关
+  try {
+    if (ctx.env && ctx.env.JDUNION === "false") return {};
+  } catch (e) {}
   const now = Date.now();
   const GAP = 3600000; // 1 小时
   function throttled(kind) {
